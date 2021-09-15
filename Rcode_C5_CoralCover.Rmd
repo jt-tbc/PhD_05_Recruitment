@@ -1,0 +1,1692 @@
+---
+title: "C2_1_DataPrep"
+author: "Joe Turner"
+date: "11 May 2017"
+output: pdf_document
+---
+
+```{r}
+
+###############################################
+## INITIAL DATA SET-UP FROM TRANSECT MEASURE ##
+###############################################
+
+
+# 1) Set working directory and load packages
+library(plyr)
+library(vegan)
+library(doBy)
+library(rgdal)
+library(clustsig)
+library(gdata)
+library(ggplot2)
+library(scales)
+library(ggrepel)
+library(RColorBrewer)
+library(reshape2)
+library(reshape)
+library(grid)
+library(dplR)
+library(gridExtra)
+library(ecodist)
+library(pvclust)
+library(mclust)
+library(factoextra)
+library(NbClust)
+library(cluster)
+library(gtools)
+st.err <- function(x) {sd(x)/sqrt(length(x))}
+asinTransform <- function(x){
+  asin(sign(x) * sqrt(abs(x)))
+}
+
+
+setwd("C:/OneDrive/C5_Recruit/Data/TransectMeasure/AUV_Outputs")
+
+#2) Make an automatic list of all files present in the directory
+file_list<-list.files()
+
+#3) Combine all the files into a list where each layer contains only the data
+##This requires the first 4 lines of the Transect Measure .txt output to be ignored
+dataset <- lapply(file_list, read.table, sep="\t", header=FALSE, row.names=NULL, skip=5)
+
+#4) Combine the data into a single dataframe
+alldata<-do.call(rbind.fill,dataset)
+
+#5)Standardize the column names
+alldata <- alldata[,-c(2:5,9,12:17,23:25)]
+
+FILENAME<-alldata[,1]
+DATE<-alldata[,2]
+AREA<-alldata[,3]
+SITE<-alldata[,4]
+OBSERVER<-alldata[,5]
+CONTINUOUS_Y_N<-alldata[,6]
+OVERVIEW<-alldata[,7]
+DESCRIPTION<-alldata[,8]
+BROAD<-alldata[,9]
+MORPHOLOGY<-alldata[,10]
+DETAIL<-alldata[,11]
+
+#6) Combine into a final dataframe for output
+final.data<-data.frame(FILENAME, DATE, AREA, SITE,OBSERVER,OVERVIEW,DESCRIPTION,BROAD,MORPHOLOGY,DETAIL)
+
+setwd("C:/OneDrive/C5_Recruit/Data/TransectMeasure/AUV_Outputs")
+#Output a .csv file to the directory where all the .txt files are located
+write.csv(final.data, file="Combined_AUV_Data.csv")
+
+```
+
+
+
+
+```{r AUV Create % cover matrices, message=FALSE, warning=FALSE}
+
+setwd("C:/OneDrive/C5_Recruit/Data/TransectMeasure/AUV_Outputs")
+imagedata <- read.csv("Combined_AUV_Data.csv", header = TRUE)
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+metadata <- read.csv("9_AUV_100m_Buffer_Image_List.csv", header = TRUE, row.names = 1)
+
+
+########################################################
+# CREATE % COVER MATRICES FOR EACH LEVEL OF CATEGORIES #
+########################################################
+
+broad<- cast(imagedata, FILENAME ~ BROAD, value = BROAD) # re structures the data based on the FILENAME column by the FINAL habitat categories
+rownames(broad)<-broad[,1] # changes filename to row name
+broad$FILENAME<- NULL #removes old filename column
+broadpercent<- broad/25 # divide by 25 for %
+write.csv(broadpercent, file = "10_AUV_Detail_Matrix.csv")
+
+
+################################################
+## MERGE WITH ENVRIONMENTAL DATA FROM STARBUG ##
+################################################
+
+detailpercent <- read.csv("11_AUV_Detail_Matrix_EDIT.csv")
+merge<- merge(metadata, detailpercent, by.x = "Filename", by.y = "Filename", all.x=TRUE)
+write.csv(merge, file = "12_AUV_Image_100m_Buffer_Data_Merge.csv")
+
+
+```
+
+```{r Flat/Slope Create % cover matrices, message=FALSE, warning=FALSE}
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+metadata <- read.csv("15_Reef_Flat_Metadata.csv", header = TRUE)
+
+detailpercent <- read.csv("14_Reef_Flat_Detail_Matrix_EDIT.csv")
+merge<- merge(metadata, detailpercent, by.x = "Filename", by.y = "Filename", all.x=TRUE)
+write.csv(merge, file = "16_Reef_Flat_Data_Merge.csv")
+
+
+```
+
+```{r bind datasets}
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+AUV <- read.csv("12_AUV_Image_100m_Buffer_Data_Merge.csv")
+Flat <- read.csv("16_Reef_Flat_Data_Merge.csv")
+
+colnames(AUV)[11] <- "Bottom Depth"
+colnames(Flat)[4] <- "Area"
+AUV <- AUV[,-c(1,3,7,8)]
+Flat <- Flat[,-c(1,3)]
+Flat$Site <- as.character(Flat$Site)
+
+bind <- smartbind(AUV, Flat)
+
+write.csv(bind, "17_Bind_AUV_Flat_Data.csv")
+
+```
+
+```{r summarise cover data}
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+data <- read.csv("18_Bind_AUV_Flat_Data_EDIT.csv")
+library(dplyr)
+summary <- data %>% group_by(Area, Depth) %>% summarise(coral  = mean(Hard.Coral), 
+                                                        coral_sd  = sd(Hard.Coral), 
+                                                        coral_se  = st.err(Hard.Coral),
+                                                        Acropora  = mean(Acropora), 
+                                                        Acropora_sd  = sd(Acropora), 
+                                                        Acropora_se  = st.err(Acropora),
+                                                        Favid  = mean(Favid), 
+                                                        Favid_sd  = sd(Favid), 
+                                                        Favid_se  = st.err(Favid),
+                                                        Pocillopora  = mean(Pocillopora), 
+                                                        Pocillopora_sd  = sd(Pocillopora), 
+                                                        Pocillopora_se  = st.err(Pocillopora),
+                                                        Porites  = mean(Porites), 
+                                                        Porites_sd  = sd(Porites), 
+                                                        Porites_se  = st.err(Porites),
+                                                        Montipora  = mean(Montipora), 
+                                                        Montipora_sd  = sd(Montipora), 
+                                                        Montipora_se  = st.err(Montipora))
+
+summary <- as.data.frame(summary)
+slope <- read.csv("20_Reef_Slope_Data_Coral.csv", head = T)
+
+combine <- rbind(summary, slope)
+combine$Depth <- factor(combine$Depth, levels = c("3m", "8m", "25m", "40m"))
+
+
+cover_site <- ggplot(combine, aes(x=Depth, y=coral)) + 
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      facet_grid(~Area)+
+                      labs(y = "Mean Hard Coral Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_errorbar(aes(ymin=coral-coral_se, ymax=coral+coral_se), width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "14_Coral_Cover_by_Site.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+cover_site
+dev.off()
+
+overall_summary <- combine %>% group_by(Depth) %>% summarise(coral  = mean(coral),
+                                                        coral_se  = st.err(coral),
+                                                        Acropora  = mean(Acropora),  
+                                                        Acropora_se  = st.err(Acropora),
+                                                        Favid  = mean(Favid), 
+                                                        Favid_se  = st.err(Favid),
+                                                        Pocillopora  = mean(Pocillopora), 
+                                                        Pocillopora_se  = st.err(Pocillopora),
+                                                        Porites  = mean(Porites), 
+                                                        Porites_se  = st.err(Porites),
+                                                        Montipora  = mean(Montipora), 
+                                                        Montipora_se  = st.err(Montipora))
+
+cover_overall <- ggplot(overall_summary, aes(x=Depth, y=coral)) + 
+                      labs(y = "Mean Hard Coral Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      geom_errorbar(aes(ymin=coral-coral_se, ymax=coral+coral_se), width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "15_Coral_Cover_Overall.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+cover_overall
+dev.off()
+
+
+Acropora_overall <- ggplot(overall_summary, aes(x=Depth, y=Acropora)) + 
+                      labs(y = "Mean Acropora Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "16_Acropora_Cover_Overall.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Acropora_overall
+dev.off()
+
+Pocillopora_overall <- ggplot(overall_summary, aes(x=Depth, y=Pocillopora)) + 
+                      labs(y = "Mean Pocillopora Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "17_Pocillopora_Cover_Overall.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Pocillopora_overall
+dev.off()
+
+Favid_overall <- ggplot(overall_summary, aes(x=Depth, y=Favid)) + 
+                      labs(y = "Mean Favid Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+Favid_overall
+
+Porites_overall <- ggplot(overall_summary, aes(x=Depth, y=Porites)) + 
+                      labs(y = "Mean Porites Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "18_Porites_Cover_Overall.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Porites_overall
+dev.off()
+
+Montipora_overall <- ggplot(overall_summary, aes(x=Depth, y=Montipora)) + 
+                      labs(y = "Mean Montipora Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "19_Montipora_Cover_Overall.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Montipora_overall
+dev.off()
+
+```
+
+```{r compare coral cover and recruitment}
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+
+data <- read.csv("2_Recruit_Summary.csv", header = T)
+recruits <- read.csv("3_All_Recruits.csv", header = T)
+
+set.seed(3456789)
+# Summarise data by each tile, add together side, top and bottom
+sum_tile <- data %>% group_by(Area, Depth, Method, Replicate, Tile) %>% summarise(sum(Total))
+sum_tile$per100 <- sum_tile$`sum(Total)`/ 2.86
+
+# Summarise by each replicate (cluster / block)
+sum_rep <- sum_tile %>% group_by(Area, Depth, Method, Replicate) %>% summarise(mean = mean(`sum(Total)`), sd = sd(`sum(Total)`), se = st.err(`sum(Total)`))
+colnames(sum_rep)[5] <- "MeanRecruits" 
+
+recruit_summary <- sum_rep %>% 
+                    group_by(Area, Depth) %>% 
+                    summarise(recruit_mean = mean(MeanRecruits), 
+                              recruit_sd = sd(MeanRecruits), 
+                              recruit_se = st.err(MeanRecruits))
+
+recruit_summary$Area <- as.character(recruit_summary$Area)
+recruit_summary$Area[recruit_summary$Area == "Helby Banks (69732)"] <- "Helby Banks"
+recruit_summary$Area[recruit_summary$Area == "Mangrove (69427)"] <- "Mangrove"
+recruit_summary$Area[recruit_summary$Area == "Tantabiddi (69760)"] <- "Tantabiddi"
+recruit_summary$Area <- as.factor(recruit_summary$Area)
+
+recruit_summary$Depth <- gsub(" ", "", recruit_summary$Depth)
+recruit_summary$Concatanate <- paste(recruit_summary$Area, recruit_summary$Depth)
+combine$Concatanate <- paste(combine$Area, combine$Depth)
+
+recruit_summary[is.na(recruit_summary)] <- 0
+combine[is.na(combine)] <- 0
+
+merge <- merge(combine, recruit_summary, by.x = "Concatanate", by.y = "Concatanate", all.x=TRUE)
+colnames(merge)[2] <- "Area"
+colnames(merge)[3] <- "Depth"
+merge$Area.y <- NULL
+merge$Depth.y <- NULL
+
+
+plot(merge$coral, merge$recruit_mean)
+abline(lm(merge$recruit_mean ~ merge$coral))
+
+```
+
+```{r for 6 random points for flat rather than 25}
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+
+# Data prep, select 6 random points
+
+library(dplyr)  
+set.seed(345)
+dat <- read.csv("13_Reef_Flat_Transect_Measure_COMBINE.csv", head = T)
+dat2 = dat %>%
+  group_by(Filename) %>%
+  sample_n(size = 6)
+write.csv(dat2, "24_Reef_Flat_Transect_Measure_COMBINE_6_points.csv")
+
+# merge with metadata
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+metadata <- read.csv("15_Reef_Flat_Metadata.csv", header = TRUE)
+detailpercent <- read.csv("25_Reef_Flat_Detail_Matrix_EDIT_6_Points.csv")
+merge<- merge(metadata, detailpercent, by.x = "Filename", by.y = "Filename", all.x=TRUE)
+write.csv(merge, file = "26_Reef_Flat_Data_Merge_6_points.csv")
+
+metadataSlope <- read.csv("27_Reef_Slope_Metadata.csv", header = TRUE)
+detailpercentSlope <- read.csv("23_Reef_Slope_Detail_Matrix_EDIT.csv")
+mergeSlope <- merge(metadataSlope, detailpercentSlope, by.x = "Filename", by.y = "Filename", all.x=TRUE)
+write.csv(mergeSlope, file = "28_Reef_Slope_Data_Merge.csv")
+
+# merge AUV, flat, and slope data
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+AUV <- read.csv("12_AUV_Image_100m_Buffer_Data_Merge.csv")
+Flat <- read.csv("26_Reef_Flat_Data_Merge_6_points.csv")
+Slope <- read.csv("28_Reef_Slope_Data_Merge.csv")
+
+colnames(Flat)[4] <- "Area"
+AUV <- AUV[,-c(1,3,7,8)]
+Flat <- Flat[,-c(1,3)]
+Flat$Site <- as.character(Flat$Site)
+Slope$Site <- as.character(Slope$Site)
+Slope <- Slope[,-c(1,3)]
+
+bind <- smartbind(AUV, Flat)
+bind2 <- smartbind(bind, Slope)
+
+write.csv(bind2, "29_Bind_All_Data_Flat_6_Points.csv")
+
+# plot coral cover
+
+data <- read.csv("30_Bind_All_Data_Flat_6_Points_EDIT.csv")
+library(dplyr)
+summary <- data %>% group_by(Area, Depth) %>% summarise(coral  = mean(Hard.Coral), 
+                                                        Acropora  = mean(Acropora), 
+                                                        Favid  = mean(Favid), 
+                                                        Pocillopora  = mean(Pocillopora), 
+                                                        Porites  = mean(Porites), 
+                                                        Montipora  = mean(Montipora))
+
+summary <- as.data.frame(summary)
+
+summary$Depth <- factor(summary$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+
+cover_site <- ggplot(summary, aes(x=Depth, y=coral)) + 
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      facet_grid(~Area)+
+                      labs(y = "Hard Coral Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold"))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "21_Coral_Cover_by_Site_6_points_flat.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+cover_site
+dev.off()
+
+overall_summary <- data %>% group_by(Depth) %>% summarise(coral  = mean(Hard.Coral),
+                                                             SD = sd(Hard.Coral),
+                                                             SE = st.err(Hard.Coral),
+                                                             Acropora  = mean(Acropora),
+                                                             Acropora_SD = sd(Acropora),
+                                                             Acropora_SE = st.err(Acropora),
+                                                             Favid  = mean(Favid), 
+                                                             Favid_SD = sd(Favid),
+                                                             Favid_SE = st.err(Favid),
+                                                             Pocillopora  = mean(Pocillopora), 
+                                                             Pocillopora_SD = sd(Pocillopora),
+                                                             Pocillopora_SE = st.err(Pocillopora),
+                                                             Porites  = mean(Porites), 
+                                                             Porites_SD = sd(Porites),
+                                                             Porites_SE = st.err(Porites),
+                                                             Montipora  = mean(Montipora),
+                                                             Montipora_SD = sd(Montipora),
+                                                             Montipora_SE = st.err(Montipora))
+
+overall_summary$Depth <- factor(overall_summary$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+
+cover_overall <- ggplot(overall_summary, aes(x=Depth, y=coral)) + 
+                      labs(y = "Mean Hard Coral Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      geom_errorbar(aes(ymin=coral-SE, ymax=coral+SE), width=.2, position = position_dodge(.9))
+  
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "22_Coral_Cover_Overall_6_points_flat.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+cover_overall
+dev.off()
+
+
+Acropora_overall <- ggplot(overall_summary, aes(x=Depth, y=Acropora)) + 
+                      labs(y = "Acropora Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "23_Acropora_Cover_Overall_6_points_flat.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Acropora_overall
+dev.off()
+
+Favid_overall <- ggplot(overall_summary, aes(x=Depth, y=Favid)) + 
+                      labs(y = "Favid Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "27_Favid_Cover_Overall_6_points_flat.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Favid_overall
+dev.off()
+
+Pocillopora_overall <- ggplot(overall_summary, aes(x=Depth, y=Pocillopora)) + 
+                      labs(y = "Pocillopora Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "24_Pocillopora_Cover_Overall_6_points_flat.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Pocillopora_overall
+dev.off()
+
+
+Porites_overall <- ggplot(overall_summary, aes(x=Depth, y=Porites)) + 
+                      labs(y = "Porites Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "25_Porites_Cover_Overall_6_points_flat.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Porites_overall
+dev.off()
+
+Montipora_overall <- ggplot(overall_summary, aes(x=Depth, y=Montipora)) + 
+                      labs(y = "Montipora Cover (%)") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "26_Montipora_Cover_Overall_6_points_flat.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Montipora_overall
+dev.off()
+
+```
+
+```{r find images to count coral colonies}
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+# randomdata <- read.csv("18_Bind_AUV_Flat_Data_EDIT.csv", head = T)
+randomdata <- read.csv("23_Reef_Slope_Detail_Matrix_EDIT.csv", head = T)
+
+
+# origindir <- c("F:/Data/2016_StarBug_Random_Images/all_images")
+origindir <- c("E:/C5_Recruit/Shallow Photos/Transect/2016/All Images")
+targetdir <- c("C:/OneDrive/C5_Recruit/Data/All_Images")
+filestocopy <- as.character(randomdata$Filename)
+
+lapply(filestocopy, function(x) file.copy(paste (origindir, x , sep = "/"),  
+                                          paste (targetdir,x, sep = "/"), recursive = FALSE,  copy.mode = TRUE))
+
+
+
+origindir <- c("F:/C5_Recruit/Meshes/All Images")
+targetdir <- c("C:/OneDrive/C5_Recruit/Data/AUV_Images")
+filestocopy <- as.character(randomdata$Filename)
+
+lapply(filestocopy, function(x) file.copy(paste (origindir, x , sep = "/"),  
+                                          paste (targetdir,x, sep = "/"), recursive = FALSE,  copy.mode = TRUE))
+
+
+```
+
+```{r number of colonies}
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+
+colnumber <- read.csv("21_Coral_Colony_Numbers.csv", head = T)
+colsummary <- read.csv("31_Coral_Colony_Summary.csv", head = T)
+colsummary$Depth <- factor(colsummary$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+library(dplyr)
+colonies_total <- subset(colsummary, Area == "Total")
+colonies_site <- setdiff(colsummary, colonies_total)
+
+
+col_number_site <- ggplot(colonies_site, aes(x=Depth, y=Mean)) + 
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      facet_grid(~Area)+
+                      labs(y = "Mean Number of Colonies per Image") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_errorbar(aes(ymin=Mean-SE, ymax=Mean+SE), width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "28_Number_of_Colonies_by_Site_MEAN.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+col_number_site
+dev.off()
+
+number_col_overall <- ggplot(colonies_total, aes(x=Depth, y=Mean)) + 
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      labs(y = "Mean Number of Colonies per Image") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_errorbar(aes(ymin=Mean-SE, ymax=Mean+SE), width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "29_Overall_Number_Colonies_by_Depth_MEAN.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+number_col_overall
+dev.off()
+
+col_number_site_total <- ggplot(colonies_site, aes(x=Depth, y=Sum)) + 
+                      labs(y = "Total Colonies") +
+                      facet_grid(~Area)+
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity")
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "30_Number_Colonies_Site_SUM.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+col_number_site_total
+dev.off()
+
+number_col_overall_total <- ggplot(colonies_total, aes(x=Depth, y=Sum)) + 
+                      labs(y = "Total Colonies") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity")
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "31_Overall_Number_Colonies_SUML.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+number_col_overall_total
+dev.off()
+
+
+Acropora_overall <- ggplot(colonies_total, aes(x=Depth, y=Acropora_Mean)) + 
+                      labs(y = "Mean Acropora Colony Number per Image") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      geom_errorbar(aes(ymin=Acropora_Mean-Acropora_SE, ymax=Acropora_Mean+Acropora_SE), 
+                                    width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "32_Acropora_Colony_Numbers_MEAN.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Acropora_overall
+dev.off()
+
+
+Favid_overall <- ggplot(colonies_total, aes(x=Depth, y=Favid_Mean)) + 
+                      labs(y = "Mean Favid Colony Number per Image") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      geom_errorbar(aes(ymin=Favid_Mean-Favid_SE, ymax=Favid_Mean+Favid_SE), 
+                                    width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "33_Favid_Colony_Numbers_MEAN.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Favid_overall
+dev.off()
+
+Porites_overall <- ggplot(colonies_total, aes(x=Depth, y=Porites_Mean)) + 
+                      labs(y = "Mean Porites Colony Number per Image") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      geom_errorbar(aes(ymin=Porites_Mean-Porites_SE, ymax=Porites_Mean+Porites_SE), 
+                                    width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "34_Porites_Colony_Numbers_MEAN.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Porites_overall
+dev.off()
+
+Pocillopora_overall <- ggplot(colonies_total, aes(x=Depth, y=Pocillopora_Mean)) + 
+                      labs(y = "Mean Pocillopora Colony Number per Image") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      geom_errorbar(aes(ymin=Pocillopora_Mean-Pocillopora_SE, ymax=Pocillopora_Mean+Pocillopora_SE), 
+                                    width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "35_Pocillopora_Colony_Numbers_MEAN.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Pocillopora_overall
+dev.off()
+
+Montipora_overall <- ggplot(colonies_total, aes(x=Depth, y=Montipora_Mean)) + 
+                      labs(y = "Mean Montipora Colony Number per Image") +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      geom_errorbar(aes(ymin=Montipora_Mean-Montipora_SE, ymax=Montipora_Mean+Montipora_SE), 
+                                    width=.2, position = position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "36_Montipora_Colony_Numbers_MEAN.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+Montipora_overall
+dev.off()
+
+
+```
+
+```{r combine final data}
+
+# Combine Metadata
+setwd("C:/OneDrive/C5_Recruit/Data")
+AUV_meta <- read.csv("9_AUV_100m_Buffer_Image_List.csv", head = T, na.strings=c("","NA"))
+AUV_meta <- AUV_meta[complete.cases(AUV_meta), ]
+AUV_meta <- AUV_meta[, -c(1,3,8,9,10,11)]
+Flat_meta <- read.csv("15_Reef_Flat_Metadata.csv", head = T)
+Slope_meta <- read.csv("27_Reef_Slope_Metadata.csv", head = T)
+bind <- smartbind(AUV_meta, Flat_meta)
+bind2 <- smartbind(bind, Slope_meta)
+bind2 <- bind2[, -c(5)]
+bind_rownames <- data.frame(bind2[,-1], row.names=bind2[,1])
+write.csv(bind_rownames, "33_Combined_Metadata.csv")
+
+benthic_meta <- bind_rownames
+benthic_meta$Depth <- revalue(benthic_meta$Depth, c("3 m"="3m"))
+benthic_meta$Depth <- revalue(benthic_meta$Depth, c("8 m"="8m"))
+benthic_meta$Depth <- revalue(benthic_meta$Depth, c("25 m"="25m"))
+benthic_meta$Depth <- revalue(benthic_meta$Depth, c("40 m"="40m"))
+
+# Combine Matrices for Benthic Cover
+setwd("C:/OneDrive/C5_Recruit/Data")
+AUV_matrix <- read.csv("11_AUV_Detail_Matrix_EDIT.csv", head = T)
+AUV_matrix2 <- merge(AUV_meta, AUV_matrix, by.x = "Filename", by.y = "Filename", all.x=TRUE)
+AUV_matrix2 <- AUV_matrix2[, -c(2:6)]
+Flat_matrix <- read.csv("23_Reef_Slope_Detail_Matrix_EDIT.csv", head = T)
+Slope_matrix <- read.csv("25_Reef_Flat_Detail_Matrix_EDIT_6_Points.csv", head = T)
+bind <- smartbind(AUV_matrix2, Flat_matrix)
+bind2 <- smartbind(bind, Slope_matrix)
+bind2[is.na(bind2)] <- 0
+bind_rownames <- data.frame(bind2[,-1], row.names=bind2[,1])
+write.csv(bind_rownames, "32_Combined_Matrix_DETAIL.csv")
+
+benthic_detail <- read.csv("32b_Combined_Matrix_DETAIL_EDIT.csv", head = T, row.names = 1)
+benthic_broad <- read.csv("32c_Combined_Matrix_BROAD.csv", head = T, row.names = 1)
+
+benthic_detail_merge <- merge(benthic_detail, benthic_meta, by = "row.names", all.x=TRUE)
+write.csv(benthic_detail_merge, "34_Combined_Merge_DETAIL.csv")
+benthic_detail_merge$AreaDepth <- paste(benthic_detail_merge$Area,benthic_detail_merge$Depth)
+
+benthic_broad_merge <- merge(benthic_broad, benthic_meta, by = "row.names", all.x=TRUE)
+write.csv(benthic_broad_merge, "34b_Combined_Merge_BROAD.csv")
+benthic_broad_merge$AreaDepth <- paste(benthic_broad_merge$Area,benthic_broad_merge$Depth)
+
+benthic_summary_detail <- benthic_detail_merge %>% group_by(AreaDepth) %>% 
+  summarise(Acropora  = mean(Acropora),
+            Cyphastrea = mean(Cyphastrea),
+            Echinophyllia.Oxypora = mean(Echinophyllia.Oxypora),
+            Echinopora = mean(Echinopora),
+            Favid = mean(Favid),
+            Fungia = mean(Fungia),
+            Galaxea = mean(Galaxea),
+            Montipora = mean(Montipora),
+            Non.Acropora = mean(Non.Acropora),
+            Pachyseris = mean(Pachyseris),
+            Pectinia = mean(Pectinia),
+            Platygyra = mean(Platygyra),
+            Pocillopora = mean(Pocillopora),
+            Porites = mean(Porites),
+            Stylophora = mean(Stylophora),
+            Tubastraea = mean(Tubastraea),
+            Turbinaria = mean(Turbinaria),
+            Anemone = mean(Anemone),
+            Ascidian = mean(Ascidian),
+            Black.and.Octocorals = mean(Black.and.Octocorals),
+            Brown.Macroalgae = mean(Brown.Macroalgae),
+            Bryozoan = mean(Bryozoan),
+            CCA = mean(CCA),
+            Rubble = mean(Rubble),
+            Soft.Coral = mean(Soft.Coral),
+            Green.Macroalgae = mean(Green.Macroalgae),
+            Gravel = mean(Gravel),
+            Hydroids = mean(Hydroids),
+            Red.Macroalgae = mean(Red.Macroalgae),
+            Algal.Turf = mean(Algal.Turf),
+            Sand = mean(Sand),
+            Sponge = mean(Sponge),
+            Other.Organisms = mean(Other.Organisms),
+            Millepora = mean(Millepora))
+
+benthic_summary_broad <- benthic_broad_merge %>% group_by(AreaDepth) %>% 
+  summarise(Hard.Coral = mean(Hard.Coral),
+            Macroalgae = mean(Macroalgae),
+            CCA = mean(CCA),
+            Rubble = mean(Rubble),
+            Soft.Coral = mean(Soft.Coral),
+            Gravel = mean(Gravel),
+            Algal.Turf = mean(Algal.Turf),
+            Sand = mean(Sand),
+            Other.Filter.Feeders = mean(Other.Filter.Feeders),
+            Other.Organisms = mean(Other.Organisms))
+            
+write.csv(benthic_summary_detail, "35_Benthic_Cover_Summary_Detail.csv")
+write.csv(benthic_summary_broad, "35b_Benthic_Cover_Summary_Broad.csv")
+
+# make df
+benthic_summary_detail <- as.data.frame(benthic_summary_detail)
+benthic_summary_broad <- as.data.frame(benthic_summary_broad)
+
+# make column 1 row names
+row.names(benthic_summary_detail) <- benthic_summary_detail$AreaDepth
+row.names(benthic_summary_broad) <- benthic_summary_broad$AreaDepth
+
+# remove column 1
+benthic_summary_detail$AreaDepth <- NULL
+benthic_summary_broad$AreaDepth <- NULL
+
+asinTransform <- function(x){
+  asin(sign(x) * sqrt(abs(x)))
+}
+# ArcSin Transform Benthic Cover
+benthic_detail_as <- asinTransform(benthic_summary_detail)    
+benthic_broad_as <- asinTransform(benthic_summary_broad)
+benthic_detail_as[is.na(benthic_detail_as)] <- 0
+benthic_broad_as[is.na(benthic_broad_as)] <- 0
+
+# summary meta data
+summary_metadata <- read.csv("36_Summary_Metadata.csv", head = T)
+depth <- as.factor(summary_metadata$Depth[1:12])
+area <- as.factor(summary_metadata$Area[1:12])
+labels <- as.factor(summary_metadata$Code[1:12])
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+
+
+# combine with recruit numbers and coral colonies
+setwd("C:/OneDrive/C5_Recruit/Data/")
+colonies <- read.csv("21_Coral_Colony_Numbers.csv", head = T)
+benthic <- read.csv("34b_Combined_Merge_BROAD.csv", head = T)
+benthic2 <- read.csv("34_Combined_Merge_DETAIL.csv", head = T)
+
+colonies$AreaDepth <- paste(colonies$Area, colonies$Depth)
+colonies_benthic <- merge(colonies, benthic, by.x = "Filename", by.y = "Row.names")
+colonies_benthic <- colonies_benthic[,-c(7,8,9,10,11,12,14,15,16,17,18,21,22,23,26,37,38,39,40)]
+colonies_benthic2 <- merge(colonies_benthic, benthic2, by.x = "Filename", by.y = "Row.names")
+colonies_benthic2 <- colonies_benthic2[, -c(22:29, 31:36, 38, 39, 40, 41, 44:60)]
+
+colnames(colonies_benthic2) <- c("Filename", "Year", "Area", "Site", "Depth", "Acropora_Colonies", "Montipora_Colonies",
+                                 "Pocillopora_Colonies",
+                                "Porites_Colonies", "Total_Colonies", "AreaDepth", "Hard_Coral_Cover", "Macroalgae_Cover", 
+                                "Other_Filter_Feeder_Cover", "Soft_Coral_Cover", "Algal_Turf_Cover", "Sand_Cover", "CCA_Cover",
+                                "Rubble_Cover",
+                                "Gravel_Cover", "Other_Organism_Cover", "Acropora_Cover", "Montipora_Cover", "Pocillopora_Cover",
+                                "Porites_Cover")
+# check transforamtions
+pred.vars <- colnames(colonies_benthic[,c(6:10, 12:21)])
+
+asinTransform <- function(x){
+  asin(sign(x) * sqrt(abs(x)))
+}
+
+# Check distributions----
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+pdf("ColonyNumber_BenthicCover_distributions.pdf", title = "Predictor variable distributions")
+par(mfrow=c(4,2))
+
+for (i in pred.vars) {
+   x<-colonies_benthic[ ,i]
+   x = as.numeric(unlist(x))
+   hist((x))#Looks best
+   plot((x),main = paste(i))
+   hist(sqrt(x))
+   plot(sqrt(x))
+   hist(log(x+1))
+   plot(log(x+1))
+   hist(asinTransform(x))
+   plot(asinTransform(x))
+ }
+dev.off()
+
+
+# log transform colony numbers
+# arc sine transform % cover
+
+colonies_benthic2<- colonies_benthic2 %>%
+  mutate(log.Acropora.Colonies = log(Acropora_Colonies+1))%>%
+  mutate(log.Montipora.Colonies = log(Montipora_Colonies+1))%>%
+  mutate(log.Pocillopora.Colonies = log(Pocillopora_Colonies+1))%>%
+  mutate(log.Porites.Colonies = log(Porites_Colonies+1))%>%
+  mutate(log.Total.Colonies = log(Total_Colonies+1)) %>%
+  mutate(as.Hard.Coral = asinTransform(Hard_Coral_Cover)) %>%
+  mutate(as.Macroalgae = asinTransform(Macroalgae_Cover)) %>%
+  mutate(as.Other_Filter_Feeder = asinTransform(Other_Filter_Feeder_Cover)) %>%
+  mutate(as.Soft.Coral = asinTransform(Soft_Coral_Cover)) %>%
+  mutate(as.Algal.Turf = asinTransform(Algal_Turf_Cover)) %>%
+  mutate(as.Sand = asinTransform(Sand_Cover)) %>%
+  mutate(as.CCA = asinTransform(CCA_Cover)) %>%
+  mutate(as.Rubble = asinTransform(Rubble_Cover)) %>%
+  mutate(as.Gravel = asinTransform(Gravel_Cover)) %>%
+  mutate(as.Other_Organism = asinTransform(Other_Organism_Cover)) %>%
+  mutate(as.Acropora = asinTransform(Acropora_Cover)) %>%
+  mutate(as.Montipora = asinTransform(Montipora_Cover)) %>%
+  mutate(as.Pocillopora = asinTransform(Pocillopora_Cover)) %>%
+  mutate(as.Porites = asinTransform(Porites_Cover))
+  
+colonies_benthic2[is.na(colonies_benthic2)] <- 0
+
+colonies_benthic_summary <- colonies_benthic2 %>%
+  group_by(Depth, Area) %>%
+  summarise(Acropora.colonies = mean(log.Acropora.Colonies),
+            Montipora.colonies = mean(log.Montipora.Colonies),
+            Pocillopora.colonies = mean(log.Pocillopora.Colonies),
+            Porites.colonies = mean(log.Porites.Colonies),
+            Total.colonies = mean(log.Total.Colonies),
+            Hard.coral.cover = mean(as.Hard.Coral),
+            Macroalgae.cover = mean(as.Macroalgae),
+            Filter.feeder.cover = mean(as.Other_Filter_Feeder),
+            Soft.coral.cover = mean(as.Soft.Coral),
+            Algal.Turf.cover = mean(as.Algal.Turf),
+            Sand.cover = mean(as.Sand),
+            CCA.cover = mean(as.CCA),
+            Rubble.cover = mean(as.Rubble),
+            Gravel.cover = mean(as.Gravel),
+            Other.cover = mean(as.Other_Organism),
+            Acropora.cover = mean(as.Acropora),
+            Montipora.cover = mean(as.Montipora),
+            Pocillopora.cover = mean(as.Pocillopora),
+            Porites.cover = mean(as.Porites))
+
+colonies_benthic_summary$AreaDepth <- paste(colonies_benthic_summary$Area, colonies_benthic_summary$Depth)
+
+##################
+## RECRUIT DATA ##
+#################
+
+recruits <- read.csv("2_Recruit_Summary.csv", header = T)
+
+# summarise by tile, per 100 cm2
+summary_tile <- recruits %>% group_by(Area, Depth, Method, Replicate, Tile) %>% 
+  summarise(Acropora_recruits = sum(Acropora)/2.86,
+            Other_recruits = sum(Other)/2.86,
+            Pocillopora_recruits = sum(Pocillopora)/2.86,
+            Porites_recruits = sum(Porites)/2.86,
+            Total_recruits = sum(Total)/2.86) 
+
+# add area depth and summarise by site
+summary_tile$Area <- revalue(summary_tile$Area, c("Helby Banks (69732)"="Helby Banks"))
+summary_tile$Area <- revalue(summary_tile$Area, c("Tantabiddi (69760)"="Tantabiddi"))
+summary_tile$Area <- revalue(summary_tile$Area, c("Mangrove (69427)"="Mangrove"))
+summary_tile$AreaDepth <- paste(summary_tile$Area, summary_tile$Depth)
+
+recruit_summary <- summary_tile %>% group_by(AreaDepth) %>% 
+  summarise(Acropora_recruits = mean(Acropora_recruits),
+            Other_recruits = mean(Other_recruits),
+            Pocillopora_recruits = mean(Pocillopora_recruits),
+            Porites_recruits = mean(Porites_recruits),
+            Total_recruits = mean(Total_recruits))
+
+final_summary <- merge(recruit_summary, colonies_benthic_summary, by.x = "AreaDepth", by.y = "AreaDepth", all.x = TRUE)
+final_summary <- final_summary[,c(1,7,8,2:6,9:27)]
+write.csv(final_summary, "37_Overall_Summary_Recruits_Cover_Colonies.csv")
+
+```
+
+```{r CORRELATION COEFFICIENTS and benthic differences}
+
+# http://www.sthda.com/english/wiki/correlation-test-between-two-variables-in-r
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+data <- read.csv("37_Overall_Summary_Recruits_Cover_Colonies.csv", head = T)
+
+library(ggpubr)
+ggscatter(data, x = "Total_recruits", y = "Hard.coral.cover", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson")
+
+x <- data[9]
+y <- data[10:27]
+cor(x, y, method = "pearson")
+cor.test(data$Total_recruits, data$Hard.coral.cover, method = "pearson")
+
+
+# https://rstudio-pubs-static.s3.amazonaws.com/240657_5157ff98e8204c358b2118fa69162e18.html
+require(ggpubr)
+require(tidyverse)
+require(Hmisc)
+require(corrplot)
+
+# test normality
+lshap <- lapply(data[5:28], shapiro.test)
+lres <- sapply(lshap, `[`, c("statistic","p.value"))
+t(lres)
+
+# check data
+ggqqplot(data$Total_recruits, ylab = "WT")
+
+library(PerformanceAnalytics)
+chart.Correlation(data[5:28], method = "pearson", histogram = FALSE)
+
+# look at what correlations look significant
+correlation <- cor(data[5:28], method = "pearson")
+correlation
+write.csv(correlation, "38_Correlation_Variables.csv")
+
+
+tot_coral <- cor.test(data$Total_recruits, data$Hard.coral.cover, method = "pearson")
+tot_col <- cor.test(data$Total_recruits, data$Total.colonies, method = "pearson")
+
+oth_cca <- cor.test(data$Other_recruits, data$CCA.cover, method = "pearson")
+tot_cca <- cor.test(data$Total_recruits, data$CCA.cover, method = "pearson")
+acr_cca <- cor.test(data$Acropora_recruits, data$CCA.cover, method = "pearson")
+por_cca <- cor.test(data$Porites_recruits, data$CCA.cover, method = "pearson")
+poc_cca <- cor.test(data$Pocillopora_recruits, data$CCA.cover, method = "pearson")
+
+oth_Gravel <- cor.test(data$Other_recruits, data$Gravel.cover, method = "pearson")
+tot_Gravel <- cor.test(data$Total_recruits, data$Gravel.cover, method = "pearson")
+acr_Gravel <- cor.test(data$Acropora_recruits, data$Gravel.cover, method = "pearson")
+por_Gravel <- cor.test(data$Porites_recruits, data$Gravel.cover, method = "pearson")
+poc_Gravel <- cor.test(data$Pocillopora_recruits, data$Gravel.cover, method = "pearson")
+
+oth_Soft.coral <- cor.test(data$Other_recruits, data$Soft.coral.cover, method = "pearson")
+tot_Soft.coral <- cor.test(data$Total_recruits, data$Soft.coral.cover, method = "pearson")
+acr_Soft.coral <- cor.test(data$Acropora_recruits, data$Soft.coral.cover, method = "pearson")
+por_Soft.coral <- cor.test(data$Porites_recruits, data$Soft.coral.cover, method = "pearson")
+poc_Soft.coral <- cor.test(data$Pocillopora_recruits, data$Soft.coral.cover, method = "pearson")
+
+poc_poccol <- cor.test(data$Pocillopora_recruits, data$Pocillopora.colonies, method = "pearson")
+poc_poccov <- cor.test(data$Pocillopora_recruits, data$Pocillopora.cover, method = "pearson")
+
+
+tot_sc
+tot_grav
+tot_coral
+tot_col
+oth_coral
+poc_poccol
+poc_poccov
+
+oth_cca
+tot_cca
+acr_cca
+por_cca
+poc_cca
+
+oth_Gravel
+tot_Gravel
+acr_Gravel
+por_Gravel 
+poc_Gravel
+
+oth_Soft.coral
+tot_Soft.coral
+acr_Soft.coral
+por_Soft.coral
+poc_Soft.coral 
+
+ggscatter(data, x = "Other_recruits", y = "Hard.coral.cover",
+          add = "reg.line", conf.int = TRUE,
+          cor.coef = TRUE, cor.method = "pearson")
+
+
+# ANOVA - Benthic Cover
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+plotdata <- read.csv("39b_Plot_Data_percent.csv", head = T)
+
+plotdata$Depth <- factor(plotdata$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+
+cover_site <- ggplot(plotdata, aes(x=Depth, y=Cover, fill = Category)) + 
+                      geom_bar(position=position_dodge(), stat="identity", color = "black") +
+                      facet_grid(~Area)+
+                      labs(y = "Percent Cover (%)") +
+                      scale_fill_grey(start = 0, end = 1) +
+                      theme_bw() +
+                      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      guides(fill = guide_legend(reverse=FALSE, title= NULL))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "39_Coral_CCA_Macroalgae_Site_Depth.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+cover_site
+dev.off()
+
+plot_summary <- plotdata %>% group_by(Depth, Category) %>% summarise(mean  = mean(Cover),
+                                                             SD = sd(Cover),
+                                                             SE = st.err(Cover))
+
+plot_summary$Depth <- factor(plot_summary$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+
+cover_overall <- ggplot(plot_summary, aes(x=Depth, y=mean, fill = Category)) + 
+                      labs(y = "Percent Cover ± SE (%)") +
+                      scale_fill_grey(start = 0, end = 1) +
+                      theme_bw() +
+                      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      geom_bar(position=position_dodge(), stat="identity",colour = "black") +
+                      geom_errorbar(aes(ymin=mean-SE, ymax=mean+SE), width=.2, position = position_dodge(.9)) +
+                      guides(fill = guide_legend(reverse=FALSE, title= NULL))
+  
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "40_Coral_CCA_Macroalgae_Depth.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+cover_overall
+dev.off()
+
+
+# Hard Coral
+anova(lm(Hard.coral.cover ~ Depth, data = data))
+anova(lm(Hard.coral.cover ~ Depth * Area, data = data))
+
+# non-Parametric tests
+summary(data)
+with(data,boxplot(Hard.coral.cover ~ Depth, 
+                      col= "lightgray",
+                      main= "",
+                      xlab= "Depth", 
+                      ylab= "Hard Coral Cover", 
+                      las= 1))
+# Implement Kruskal-Wallis test
+with(data, kruskal.test(Hard.coral.cover ~ Depth))
+# Pairwise comparisons
+with(data, pairwise.wilcox.test(Hard.coral.cover, Depth, exact = FALSE))
+
+
+
+# Macroalgae
+anova(lm(Macroalgae ~ Depth, data = data))
+
+# non-Parametric tests
+summary(data)
+with(data,boxplot(Macroalgae.cover ~ Depth, 
+                      col= "lightgray",
+                      main= "",
+                      xlab= "Depth", 
+                      ylab= "Macroalgae Cover", 
+                      las= 1))
+# Implement Kruskal-Wallis test
+with(data, kruskal.test(Macroalgae.cover ~ Depth))
+# Pairwise comparisons
+with(data, pairwise.wilcox.test(Macroalgae.cover, Depth, exact = FALSE))
+
+
+# CCA
+anova(lm(CCA ~ Depth, data = data))
+anova(lm(CCA.cover ~ Depth * Area, data = data))
+
+# non-Parametric tests
+summary(data)
+with(data,boxplot(CCA.cover ~ Depth, 
+                      col= "lightgray",
+                      main= "",
+                      xlab= "Depth", 
+                      ylab= "CCA Cover", 
+                      las= 1))
+# Implement Kruskal-Wallis test
+with(data, kruskal.test(CCA.cover ~ Depth))
+# Pairwise comparisons
+with(data, pairwise.wilcox.test(CCA.cover, Depth, exact = FALSE))
+
+# Montipora
+anova(lm(Montipora.cover ~ Depth, data = data))
+anova(lm(Montipora.cover ~ Depth * Area, data = data))
+
+# non-Parametric tests
+summary(data)
+with(data,boxplot(Montipora.cover ~ Depth, 
+                      col= "lightgray",
+                      main= "",
+                      xlab= "Depth", 
+                      ylab= "Montipora Cover", 
+                      las= 1))
+# Implement Kruskal-Wallis test
+with(data, kruskal.test(Montipora.cover ~ Depth))
+# Pairwise comparisons
+with(data, pairwise.wilcox.test(Montipora.cover, Depth, exact = FALSE))
+
+# Acropora
+anova(lm(Acropora.cover ~ Depth, data = data))
+anova(lm(Acropora.cover ~ Depth * Area, data = data))
+
+# non-Parametric tests
+summary(data)
+with(data,boxplot(Acropora.cover ~ Depth, 
+                      col= "lightgray",
+                      main= "",
+                      xlab= "Depth", 
+                      ylab= "Acropora Cover", 
+                      las= 1))
+# Implement Kruskal-Wallis test
+with(data, kruskal.test(Acropora.cover ~ Depth))
+# Pairwise comparisons
+with(data, pairwise.wilcox.test(Acropora.cover, Depth, exact = FALSE))
+
+```
+
+```{r PCA plots}
+
+# create PCA plots
+
+library(ade4)
+library(factoextra)
+library(magrittr)
+library(ggpubr)
+
+###########
+## BROAD ##
+###########
+# http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/112-pca-principal-component-analysis-essentials/
+# http://www.sthda.com/english/wiki/factoextra-r-package-easy-multivariate-data-analyses-and-elegant-visualization 
+# http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/119-pca-in-r-using-ade4-quick-scripts/ 
+# http://www.sthda.com/english/wiki/fviz-pca-quick-principal-component-analysis-data-visualization-r-software-and-data-mining
+# https://www.rdocumentation.org/packages/ggpubr/versions/0.1.6/topics/ggpar 
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+broad <- read.csv("35b_Benthic_Cover_Summary_Broad.csv", head = T, row.names = 1)
+broad <- asinTransform(broad)
+broad[is.na(broad)] <- 0
+
+# compute PCA
+res.pca <- dudi.pca(broad,
+                    scannf = FALSE)
+# Visualize eigenvalues (scree plot). Show the percentage of variances explained by each principal component. 
+fviz_eig(res.pca)
+
+# correlation plot
+library("corrplot")
+var <- get_pca_var(res.pca)
+corrplot(var$cos2, is.corr=FALSE)
+
+# Total cos2 of variables on Dim.1 and Dim.2
+fviz_cos2(res.pca, choice = "var", axes = 1:2)
+# The cos2 values are used to estimate the quality of the representation
+# The closer a variable is to the circle of correlations, the better its representation on the factor map (and the more important it is to interpret these components)
+# Variables that are closed to the center of the plot are less important for the first components.
+
+# contributions of variables to PCs. The larger the value of the contribution, the more the variable contributes to the component.
+head(var$contrib, 10)
+
+# Contributions of variables to PC1
+fviz_contrib(res.pca, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca, choice = "var", axes = 2, top = 10)
+# Contributions of variables to both PC1 and PC2
+fviz_contrib(res.pca, choice = "var", axes = 1:2, top = 10)
+# The red dashed line on the graph above indicates the expected average contribution. If the contribution of the variables were uniform, the expected value would be 1/length(variables) = 1/10 = 10%. For a given component, a variable with a contribution larger than this cutoff could be considered as important in contributing to the component.
+# Note that, the total contribution of a given variable, on explaining the variations retained by two principal components, say PC1 and PC2, is calculated as contrib = [(C1 * Eig1) + (C2 * Eig2)]/(Eig1 + Eig2), where
+# C1 and C2 are the contributions of the variable on PC1 and PC2, respectively
+# Eig1 and Eig2 are the eigenvalues of PC1 and PC2, respectively. Recall that eigenvalues measure the amount of variation retained by each PC.
+
+
+# Graph of individuals. Individuals with a similar profile are grouped together.
+ind <- get_pca_ind(res.pca)
+ind
+
+ind.p <- fviz_pca_ind(res.pca,
+             habillage = "none",
+             axes.linetype = "solid",
+             palette = NULL,
+             addEllipses = FALSE, 
+             col.ind = "black", 
+             fill.ind = "white",
+             col.ind.sup = "blue", 
+             alpha.ind = 1, 
+             select.ind = list(name = NULL, cos2 = NULL, contrib = NULL),
+             title = " ",
+             repel = TRUE)
+
+ind_plot<- ggpubr::ggpar(ind.p,
+              xlab = "PC1 (30.8%)", ylab = "PC2 (21.2%)",
+              xlim = c(-4,4),
+              ylim = c(-4,4),
+              font.x = c("bold"),
+              font.y = c("bold"),
+              tickslab = FALSE,
+              ticks = FALSE)
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "37_PCA_Individuals.tif", width = 6, height = 6, units = 'in', res = 500, compression = 'none')
+ind_plot
+dev.off()
+
+
+# Graph of variables. Positive correlated variables point to the same side of the plot. Negative correlated variables point to opposite sides of the graph
+var.p <- fviz_pca_var(res.pca,
+             select.var = list(cos2 = 0.25),
+             repel = TRUE,
+             col.var = "black",
+             axes.linetype = "none",
+             col.circle	= "white",
+             title = " ")
+
+var_plot<- ggpubr::ggpar(var.p,
+              ggtheme = theme_void(),
+              xlab = NULL, ylab = NULL,
+              xlim = c(-1,1),
+              ylim = c(-1,1),
+              tickslab = FALSE,
+              ticks = FALSE)
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "38_PCA_Variables.tif", width = 6, height = 6, units = 'in', res = 500, compression = 'none')
+var_plot
+dev.off()
+
+
+pca_overlay <- fviz_pca_biplot(res.pca, 
+                # Individuals
+                geom.ind = "point",
+                axes.linetype = "solid",
+                palette = NULL,
+                addEllipses = FALSE, 
+                col.ind = "black", 
+                fill.ind = "white",
+                col.ind.sup = "blue", 
+                alpha.ind = 1, 
+                select.ind = list(name = NULL, cos2 = NULL, contrib = NULL),
+                # Variables
+                select.var = list(cos2 = 0.25),
+                repel = TRUE,
+                col.var = "blue",
+                col.circle	= "white",
+                title = " "
+                )
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "38_PCA_overlay.tif", width = 6, height = 6, units = 'in', res = 500, compression = 'none')
+pca_overlay
+dev.off()
+
+
+```
+
+```{r Recruit SIZE}
+
+###################
+## ALL FAMILIES ##
+##################
+setwd("C:/OneDrive/C5_Recruit/Data")
+recruits <- read.csv("3_All_Recruits.csv")
+
+recruits$Depth <- factor(recruits$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+fill <- "lightgray"
+recruits_size_plot <- ggplot(recruits, aes(x = Depth, y = Size)) +
+                      geom_boxplot(fill = fill, outlier.shape = 20) +
+                      labs(x = "Depth") +
+                      theme_bw() +
+                      ylab(expression(bold(paste(Size~(µm))))) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      scale_y_continuous(breaks = seq(0, 1750, 250), limits = c(0, 1750))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "10_recruits_sizes_boxplot.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+recruits_size_plot
+dev.off()
+
+library(Rmisc)
+recruits_sum <- summarySE(recruits, measurevar="Size", groupvars=c("Depth"))
+
+recruits_sum_plot <- ggplot(recruits_sum, aes(x=Depth, y=Size)) + 
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      ylab(expression(bold(paste(Mean~Size~(µm))))) +
+                      geom_errorbar(aes(ymin=Size-se, ymax=Size+se), width=.2, position = position_dodge(.9))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "11_recruits_Size_Bar.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+recruits_sum_plot
+dev.off()
+
+
+
+recruitsSD <- ggplot(recruits,aes(x=Size))+
+              geom_histogram(aes(y=..count../sum(..count..)), binwidth = 100,
+                             breaks = seq(0, 2000, 250)) +
+              facet_grid(~Depth)+
+              theme_bw()+
+              labs(y = "Frequency") +
+              xlab(expression(bold(paste(Size~(µm))))) +
+              theme(axis.title.x = element_text(face="bold")) +
+              theme(axis.title.y = element_text(face="bold"))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "12_recruits_Size_Histogram.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+recruitsSD
+dev.off()
+
+recruitsSD_Proportion <- ggplot(recruits, aes(x=Size)) +
+                          geom_bar(aes(y = ..prop..,group = Depth)) +
+                          facet_wrap(~Depth) + 
+                          ylab("Proportion (%)") + 
+                          xlab(expression(bold(paste(Size~(µm)))))+
+                          theme(axis.title.y = element_text(face="bold")) +
+                          scale_y_continuous(labels = percent_format()) +
+                          theme(strip.text.x = element_text(size = 12, face = "bold"))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "13_recruits_Size_Proportion_Hist.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+recruitsSD_Proportion
+dev.off()
+
+
+# ANOVA and pairwise comparisons
+recruits_a1 <- lm(Size ~ Area, data = recruits)
+summary(recruits_a1)
+anova(recruits_a1)
+pairwise.t.test(recruits$Size, recruits$Depth, p.adj = "none")
+
+# Kruscal-Wallis test
+kruskal.test(Size ~ Depth, data = recruits) 
+
+# Kolmogorov-Smirnov test
+
+recruits_3m <- subset(recruits, Depth == "3 m")
+recruits_8m <- subset(recruits, Depth == "8 m")
+recruits_25m <- subset(recruits, Depth == "25 m")
+recruits_40m <- subset(recruits, Depth == "40 m")
+  
+recruits_3m <- recruits_3m$Size
+recruits_8m <- recruits_8m$Size
+recruits_25m <- recruits_25m$Size
+recruits_40m <- recruits_40m$Size
+
+ks.test(recruits_3m, recruits_8m)
+ks.test(recruits_3m, recruits_25m)
+ks.test(recruits_3m, recruits_40m)
+ks.test(recruits_8m, recruits_25m)
+ks.test(recruits_8m, recruits_40m)
+ks.test(recruits_25m, recruits_40m)
+
+
+# calculate upper quartile for recruit size
+size <- recruits$Size
+quantile(size)
+# > 700 is largest 25%
+recruits$LargeSmall <- ifelse(recruits$Size < 701, "Small", "Large")
+recruits$LargeSmall <- factor(recruits$LargeSmall, levels = c("Small", "Large"))
+
+# chi-squared
+library(MASS)
+tbl <- table(recruits$Depth, recruits$LargeSmall)
+tbl
+chisq.test(tbl)
+chisq.test(recruits$Depth, recruits$LargeSmall, correct=FALSE)
+                      
+
+
+
+#####################
+## ACROPORIDS ONLY ##
+#####################
+
+# Look at Acropora size distribution acrss depths
+acropora <- subset(recruits, Genera == "Acropora")
+acropora$Depth <- factor(acropora$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+
+acropora_size_plot <- ggplot(acropora, aes(x = Depth, y = Size)) +
+                      geom_boxplot(fill = fill, outlier.shape = 20) +
+                      labs(x = "Depth") +
+                      theme_bw() +
+                      ylab(expression(bold(paste(Size~(µm))))) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      scale_y_continuous(breaks = seq(0, 1500, 250), limits = c(0, 1500))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "5_Acropora_sizes_boxplot.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+acropora_size_plot
+dev.off()
+
+
+geom_boxplot(fill = fill, outlier.shape = 20) +
+                      labs(x = "Depth") +
+                      theme_bw() +
+                      ylab(expression(bold(paste(Size~(µm))))) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      scale_y_continuous(breaks = seq(0, 1750, 250), limits = c(0, 1750))
+
+
+
+library(Rmisc)
+acropora_sum <- summarySE(acropora, measurevar="Size", groupvars=c("Depth"))
+
+acropora_sum_plot <- ggplot(acropora_sum, aes(x=Depth, y=Size)) + 
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      ylab(expression(bold(paste(Mean~Size~(µm))))) +
+                      geom_errorbar(aes(ymin=Size-se, ymax=Size+se), width=.2, position = position_dodge(.9))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "6_Acropora_Size_Bar.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+acropora_sum_plot
+dev.off()
+
+
+
+AcroporaSD <- ggplot(acropora,aes(x=Size))+
+              geom_histogram(aes(y=..count../sum(..count..)), binwidth = 100) +
+              facet_grid(~Depth)+
+              theme_bw()+
+              labs(y = "Frequency") +
+              xlab(expression(bold(paste(Size~(µm))))) +
+              theme(axis.title.x = element_text(face="bold")) +
+              theme(axis.title.y = element_text(face="bold"))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "7_Acropora_Size_Histogram.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+AcroporaSD
+dev.off()
+
+
+# AcroporaSD_Proportion <- ggplot(acropora, aes(x=Size, fill=Depth)) +
+  #                        geom_bar(aes(y=c(..count..[..group..==1]/sum(..count..[..group..==1]),
+   #                       ..count..[..group..==2]/sum(..count..[..group..==2]),
+    #                      ..count..[..group..==3]/sum(..count..[..group..==3]),
+     #                     ..count..[..group..==4]/sum(..count..[..group..==4]))*100),
+      #                    position='dodge') +
+       #                   ylab("Proportion (%)") + 
+        #                  xlab(expression(bold(paste(Size~(µm)))))+
+         #                 facet_grid(~Depth)
+
+
+# % size distribution classes
+
+AcroporaSD_Proportion <- ggplot(acropora, aes(x=Size)) +
+                          geom_bar(aes(y = ..prop..,group = Depth)) +
+                          facet_wrap(~Depth) + 
+                          ylab("Proportion (%)") + 
+                          xlab(expression(bold(paste(Size~(µm)))))+
+                          theme(axis.title.y = element_text(face="bold")) +
+                          scale_y_continuous(labels = percent_format()) +
+                          theme(strip.text.x = element_text(size = 12, face = "bold"))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "8_Acropora_Size_Proportion_Hist.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+AcroporaSD_Proportion
+dev.off()
+
+
+
+# ANOVA and pairwise comparisons
+acropora_a1 <- lm(Size ~ Area, data = acropora)
+summary(acropora_a1)
+anova(acropora_a1)
+pairwise.t.test(acropora$Size, acropora$Depth, p.adj = "none")
+
+# Kruscal-Wallis test
+kruskal.test(Size ~ Depth, data = acropora) 
+
+# Kolmogorov-Smirnov test
+
+acropora_3m <- subset(acropora, Depth == "3 m")
+acropora_8m <- subset(acropora, Depth == "8 m")
+acropora_25m <- subset(acropora, Depth == "25 m")
+acropora_40m <- subset(acropora, Depth == "40 m")
+  
+acropora_3m <- acropora_3m$Size
+acropora_8m <- acropora_8m$Size
+acropora_25m <- acropora_25m$Size
+acropora_40m <- acropora_40m$Size
+
+ks.test(acropora_3m, acropora_8m)
+ks.test(acropora_3m, acropora_25m)
+ks.test(acropora_3m, acropora_40m)
+ks.test(acropora_8m, acropora_25m)
+ks.test(acropora_8m, acropora_40m)
+ks.test(acropora_25m, acropora_40m)
+
+
+# >750 vs <750
+quantile(acropora$Size) # Acropora upper quantile > 600
+
+acropora$LargeSmall <- ifelse(acropora$Size < 601, "Small", "Large")
+acropora$LargeSmall <- factor(acropora$LargeSmall, levels = c("Small", "Large"))
+
+
+LargeVsmall <- ggplot(acropora, aes(x=LargeSmall)) +
+                      geom_bar(aes(y = ..prop..,group = Depth), position = "dodge") +
+                      facet_wrap(~Depth) + 
+                      ylab("Proportion (%)") + 
+                      xlab("Size Category")+
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      scale_y_continuous(labels = percent_format()) +
+                      theme(strip.text.x = element_text(size = 12, face = "bold"))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "20_Acropora_Large_v_Small.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+LargeVsmall
+dev.off()
+
+# chi-squared
+library(MASS)
+tbl <- table(acropora$Depth, acropora$LargeSmall)
+tbl
+chisq.test(tbl)
+chisq.test(acropora$Depth, acropora$LargeSmall, correct=FALSE)
+
+
+```
+
+```{r Recruits per Area available}
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+data <- read.csv("2_Recruit_Summary.csv", header = T)
+
+library(dplyr)
+
+set.seed(3456789)
+# Summarise data by each tile, add together side, top and bottom
+sum_tile <- data %>% 
+  group_by(Area, Depth, Method, Replicate, Tile) %>% 
+  summarise(Total = sum(Total.cm2),
+            Acroporidae = sum(Acropora.cm2),
+            Poritidae = sum(Porites.cm2),
+            Pocilloporidae = sum(Pocillopora.cm2),
+            Other = sum(Other.cm2))
+
+sum_rep <- sum_tile %>% 
+  group_by(Area, Depth, Method, Replicate) %>% 
+  summarise(Total = mean(Total), 
+            Total.sd = sd(Total), 
+            Total.se = st.err(Total),
+            Acroporidae = mean(Acroporidae), 
+            Acroporidae.sd = sd(Acroporidae), 
+            Acroporidae.se = st.err(Acroporidae),
+            Poritidae = mean(Poritidae), 
+            Poritidae.sd = sd(Poritidae), 
+            Poritidae.se = st.err(Poritidae),
+            Pocilloporidae = mean(Pocilloporidae), 
+            Pocilloporidae.sd = sd(Pocilloporidae), 
+            Pocilloporidae.se = st.err(Pocilloporidae),
+            Other = mean(Other), 
+            Other.sd = sd(Other), 
+            Other.se = st.err(Other))
+write.csv(sum_rep, "40_Replicate_Summary_Per_Available_Area_per_100_cm2.csv")
+
+overall_sum <- sum_tile %>% 
+  group_by(Area, Depth) %>% 
+  summarise(Total = mean(Total), 
+            Total.sd = sd(Total), 
+            Total.se = st.err(Total),
+            Acroporidae = mean(Acroporidae), 
+            Acroporidae.sd = sd(Acroporidae), 
+            Acroporidae.se = st.err(Acroporidae),
+            Poritidae = mean(Poritidae), 
+            Poritidae.sd = sd(Poritidae), 
+            Poritidae.se = st.err(Poritidae),
+            Pocilloporidae = mean(Pocilloporidae), 
+            Pocilloporidae.sd = sd(Pocilloporidae), 
+            Pocilloporidae.se = st.err(Pocilloporidae),
+            Other = mean(Other), 
+            Other.sd = sd(Other), 
+            Other.se = st.err(Other))
+
+# Plot recruits by depth
+sum_rep$Depth <- factor(sum_rep$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+sum_tile$Depth <- factor(sum_tile$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+fill <- "lightgray"
+alldata_plot <- ggplot(sum_rep, aes(x = Depth, y = Total)) +
+                geom_boxplot(fill = fill, outlier.shape = 20) +
+                labs(x = "Depth", y = expression(bold("Total Recruits / Available 100"~cm^2))) +
+                theme_bw() +
+                theme(axis.title.x = element_text(face="bold"),
+                      axis.title.y = element_text(face="bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank())
+
+alldata_plot
+
+
+Acroporidae_plot <- ggplot(sum_rep, aes(x = Depth, y = Acroporidae)) +
+                geom_boxplot(fill = fill, outlier.shape = 20) +
+                labs(x = "Depth", y = expression(bold("Acroporidae Recruits / Available 100"~cm^2))) +
+                theme_bw() +
+                theme(axis.title.x = element_text(face="bold"),
+                      axis.title.y = element_text(face="bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank())
+
+Acroporidae_plot
+
+
+pocilloporidae_plot <- ggplot(sum_rep, aes(x = Depth, y = Pocilloporidae)) +
+                geom_boxplot(fill = fill, outlier.shape = 20) +
+                labs(x = "Depth", y = expression(bold("Pocilloporidae Recruits / Available 100"~cm^2))) +
+                theme_bw() +
+                theme(axis.title.x = element_text(face="bold"),
+                      axis.title.y = element_text(face="bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank())
+
+pocilloporidae_plot
+
+
+Poritidae_plot <- ggplot(sum_rep, aes(x = Depth, y = Poritidae)) +
+                geom_boxplot(fill = fill, outlier.shape = 20) +
+                labs(x = "Depth", y = expression(bold("Poritidae Recruits / Available 100"~cm^2))) +
+                theme_bw() +
+                theme(axis.title.x = element_text(face="bold"),
+                      axis.title.y = element_text(face="bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank())
+
+Poritidae_plot
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+pdf("Standardised_Recruit_Numbers.pdf")
+alldata_plot
+Acroporidae_plot
+pocilloporidae_plot
+Poritidae_plot
+dev.off()
+
+
+# ANOVA and pairwise comparisons
+depth_a1 <- lm(Total ~ Depth, data = sum_rep)
+summary(depth_a1)
+anova(depth_a1)
+pairwise.t.test(sum_rep$Total, sum_rep$Depth, p.adj = "none")
+
+depth_a1 <- lm(Acroporidae ~ Depth, data = sum_rep)
+summary(depth_a1)
+anova(depth_a1)
+pairwise.t.test(sum_rep$Acroporidae, sum_rep$Depth, p.adj = "none")
+
+depth_a1 <- lm(Poritidae ~ Depth, data = sum_rep)
+summary(depth_a1)
+anova(depth_a1)
+pairwise.t.test(sum_rep$Poritidae, sum_rep$Depth, p.adj = "none")
+
+depth_a1 <- lm(Pocilloporidae ~ Depth, data = sum_rep)
+summary(depth_a1)
+anova(depth_a1)
+pairwise.t.test(sum_rep$Pocilloporidae, sum_rep$Depth, p.adj = "none")
+
+
+# plot all families together
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+melt <- read.csv("41_Melt_Recruit_byFamily_per100_Standardised.csv", head = T)
+melt[is.na(melt)] <- 0
+melt$Depth <- factor(melt$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+melt_total <- subset(melt, Area == "Overall")
+
+# melt$Genera <- factor(melt$Genera, levels = c("Acroporids", "Pocilloporids", "Other", "All Taxa"))
+figure <- ggplot(melt_total, aes(x = Family, y = Mean , shape = Depth))+
+          geom_point(stat="identity",position=position_dodge(.9), size = 5) +
+          scale_shape_manual(values = c(21, 22, 23, 24)) +
+          theme_classic() +
+          theme(axis.line.x = element_line(color="black", size = 1),
+          axis.line.y = element_line(color="black", size = 1)) +
+          theme(axis.text.x = element_text(colour="black", size = 15, face = "bold"), 
+                axis.text.y = element_text(colour="black", size = 15)) +
+          scale_y_continuous(breaks=seq(0,10,1)) +
+          theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+          labs(y = expression(bold("Mean Recruits / 100"~cm^2))) +
+          theme(axis.title.x = element_blank()) +
+          theme(axis.title.y = element_text(size = 15, face = "bold")) +
+          scale_fill_grey() +
+          theme(legend.title=element_blank()) +
+          geom_errorbar(aes(ymin= Mean - SE, ymax= Mean + SE), width=.2,position=position_dodge(.9)) 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "8b_Recruitment_byFamily_StandardArea.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+figure
+dev.off()
+
+```
+

@@ -1,0 +1,1003 @@
+---
+title: "Recruitment"
+author: "Joe Turner"
+date: "27 July 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(plyr)
+library(dplyr)
+library(vegan)
+library(doBy)
+library(rgdal)
+library(clustsig)
+library(gdata)
+library(ggplot2)
+library(scales)
+library(RColorBrewer)
+library(reshape2)
+library(reshape)
+library(dplR)
+library(ggthemes)
+st.err <- function(x) {sd(x)/sqrt(length(x))}
+asinTransform <- function(p) { asin(sqrt(p)) }
+
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+
+data <- read.csv("2_Recruit_Summary_NotCorrupt.csv", header = T)
+recruits <- read.csv("3_All_Recruits.csv", header = T)
+
+```
+
+
+
+```{r DATA PREP}
+
+set.seed(3456789)
+# Summarise data by each tile, add together side, top and bottom
+sum_tile <- data %>% group_by(Area, Depth, Method, Replicate, Tile) %>% summarise(sum(Total))
+sum_tile$per100 <- sum_tile$`sum(Total)`/ 2.86
+
+# Summarise by each replicate (cluster / block)
+sum_rep <- sum_tile %>% group_by(Area, Depth, Method, Replicate) %>% summarise(mean = mean(`sum(Total)`), sd = sd(`sum(Total)`), se = st.err(`sum(Total)`))
+colnames(sum_rep)[5] <- "MeanRecruits" 
+
+# Summarise for per 100 cm2
+sum_rep_per100 <- sum_tile %>% group_by(Area, Depth, Method, Replicate) %>% summarise(mean(per100))
+colnames(sum_rep_per100)[5] <- "MeanRecruits" 
+
+# Summarise proportion of each Genera
+genera_sum_tile <- recruits %>% group_by(Area, Depth, Method, Replicate, Tile, Genera) %>% summarise(count=n()) 
+
+genera_sum_rep <- genera_sum_tile %>% group_by(Area, Depth, Method, Replicate, Genera) %>% summarise(mean = mean(count), sd = sd(count), se = st.err(count))
+setwd("C:/OneDrive/C5_Recruit/Data")
+write.csv(genera_sum_rep, "5_Recruit_byGenera.csv")
+
+
+# PRIMER data prep
+summary <- data %>% group_by(Area, Depth, Method, Replicate) %>% summarise(total = mean(Total),
+                                                                           acroporidae = mean(Acropora),
+                                                                           poritidae = mean(Porites),
+                                                                           pocilloporidae = mean(Pocillopora),
+                                                                           other = mean(Other))
+setwd("C:/OneDrive/C5_Recruit/Data/PRIMER")
+write.csv(summary, "01_R_recruit_summary_PRIMER.csv")
+
+withmonti <- recruits
+withmonti <- withmonti %>% mutate(NewGenera = 
+                            ifelse(withmonti$Genera == "Acropora" & withmonti$Size < 750, "Montipora", 
+                                   ifelse(withmonti$Genera == "Acropora" & withmonti$Size > 749, "Acropora", 
+                                          ifelse(withmonti$Genera == "Porites", "Porites",
+                                                 ifelse(withmonti$Genera == "Pocillopora", "Pocillopora",
+                                                        ifelse(withmonti$Genera == "Other", "Other", "" ))))))
+
+monti_sum_tile <- withmonti %>% group_by(Area, Depth, Method, Replicate, Tile) %>% summarise(total =n(),
+                                                                                             acropora = count(NewGenera == "Acropora")) 
+setwd("C:/OneDrive/C5_Recruit/Data/PRIMER")
+write.csv(withmonti, "04_recruits_with_monti_PRIMER.csv")
+
+setwd("C:/OneDrive/C5_Recruit/Data/PRIMER")
+a <- read.csv("06_to_merge_PRIMER.csv", head = T)
+b <- read.csv("05_recruits_with_monti_tile_summary_PRIMER.csv", head = T)
+b[is.na(b)] <- 0
+merge <- merge(a, b, by.x = "ID", by.y = "ID", all.x=TRUE)
+write.csv(merge, "merge.csv")
+
+setwd("C:/OneDrive/C5_Recruit/Data/PRIMER")
+montitile <- read.csv("07_tile_summary_PRIMER.csv")
+montirep <- montitile %>% group_by(Area, Depth, Replicate) %>% summarise(total = mean(Total),
+                                                                           acropora = mean(Acropora),
+                                                                           montipora = mean(Montipora),
+                                                                           poritidae = mean(Porites),
+                                                                           pocilloporidae = mean(Pocillopora),
+                                                                           other = mean(Other))
+write.csv(montirep, "08_rep_summary_PRIMER.csv")
+
+```
+
+```{r COMPARISON, BY METHOD AND GENERA FIGURE PER 100 CM2, FIGURE 4}
+
+# Get data to compare block and Control method
+comparison <- subset(sum_rep, Depth == "Flat")
+colnames(comparison)[5] <- "MeanRecruits" 
+
+# Method Comparison
+comparison_plot <- ggplot(comparison, aes(x = Method, y = MeanRecruits)) +
+                    geom_boxplot() +
+                    labs(x = "Method", y = "Mean Recruits (per tile)") +
+                    theme(axis.title.x =element_blank())
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "Block_v_Control_Boxplot.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+comparison_plot
+dev.off()
+
+
+comparison_plot2 <- ggplot(comparison, aes(x = Method, y = MeanRecruits)) +
+                    geom_bar() +
+                    labs(x = "Method", y = "Mean Recruits (per tile)") +
+                    theme(axis.title.x =element_blank()) +
+                    geom_errorbar(aes(ymin= MeanRecruits - se, ymax= MeanRecruits + se),
+                                  width=.2,position=position_dodge(.9))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "Block_v_Control_Point.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+comparison_plot2
+dev.off()
+
+
+anova(lm(MeanRecruits ~ Method, data = comparison))
+anova(lm(MeanRecruits ~ Method * Area, data = comparison))
+
+# Site nested ANOVA
+fit <- aov(MeanRecruits ~ Method + Error(Area), data = comparison)
+summary(fit)
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+melt <- read.csv("6_Melt_Overall_per100.csv", header = T)
+melt$Taxa <- factor(melt$Taxa, levels = c("Acroporidae", "Pocilloporidae", "Other", "All Taxa"))
+FIGURE4 <- ggplot(melt, aes(x = Taxa, y = Mean , shape = Method))+
+          geom_point(stat="identity",position=position_dodge(.9), size = 5) +
+          scale_shape_manual(values = c(0,15)) +
+          theme_classic() +
+          theme(axis.line.x = element_line(color="black", size = 1),
+          axis.line.y = element_line(color="black", size = 1)) +
+          theme(axis.text.x = element_text(colour="black", size = 15, face = "bold"), 
+                axis.text.y = element_text(colour="black", size = 15)) +
+          scale_y_continuous(breaks=seq(0,4.5,0.5)) +
+          theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+          labs(y = expression(bold("Mean Recruits / 100"~cm^2))) +
+          theme(axis.title.x = element_blank()) +
+          theme(axis.title.y = element_text(size = 15, face = "bold")) +
+          scale_fill_grey() +
+          theme(legend.title=element_blank()) +
+          geom_errorbar(aes(ymin= Mean - SE, ymax= Mean + SE), width=.2,position=position_dodge(.9)) 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "FIGURE_4_Block_v_Control_byGenera.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+FIGURE4
+dev.off()
+
+```
+
+```{r Comparison, tile orientation FIGURE 5}
+
+SubRecruits <- subset(recruits, Depth == "Flat")
+
+FIGURE5 <- ggplot(SubRecruits, aes(x=Method, fill = Orientation)) + 
+                geom_bar(position = "fill", colour = "black") +
+                scale_y_continuous(labels = percent) +
+                scale_fill_grey(start = 0, end = 1) +
+                theme_bw() +
+                theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+                labs(y = "Proportion of Recruits (%)") +
+                theme(axis.title.x =element_blank()) +
+                theme(axis.text.x = element_text(colour="black", size = 15, face = "bold"), 
+                axis.text.y = element_text(colour="black", size = 15)) +
+                theme(axis.title.y = element_text(size = 15, face = "bold")) +
+                guides(fill = guide_legend(reverse=FALSE, title= NULL))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "Figure_5_Comparison_Recruit_Orientation.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+FIGURE5
+dev.off()
+
+summaryOR <- SubRecruits %>% 
+  group_by(Area, Replicate, Method, Orientation) %>%
+  summarise(number = n())
+
+anova(lm(number ~ Method, data = summaryOR))
+
+
+
+# Site nested ANOVA
+fit <- aov(number ~ Method + Error(Area), data = summaryOR)
+summary(fit)
+
+
+```
+
+```{r Recruitment patterns by SITE}
+
+site_plot <- ggplot(sum_rep, aes(x = Area, y = MeanRecruits)) +
+                geom_boxplot() +
+                labs(x = "Area", y = "Mean Recruit Number (per tile)") +
+                theme(axis.title.x = element_text(face="bold")) +
+                theme(axis.title.y = element_text(face="bold"))
+  
+anova(lm(MeanRecruits ~ Area, data = sum_rep))
+anova(lm(MeanRecruits ~ Area * Depth, data = sum_rep))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "1_Recruitment_by_SITE.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+site_plot
+dev.off()
+
+```
+
+```{r Recruitment patterns by DEPTH FIGURE 6}
+
+# Look at recruitment patterns
+
+# All data and sites
+sum_rep$Depth <- factor(sum_rep$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+alldata_plot <- ggplot(sum_rep, aes(x = Depth, y = MeanRecruits)) +
+                geom_boxplot() +
+                labs(x = "Depth", y = "Mean Recruit Number (per tile)") +
+                theme(axis.title.x = element_text(face="bold")) +
+                theme(axis.title.y = element_text(face="bold"))
+
+# ANOVA for number of recruits by depth and depth * area
+anova(lm(MeanRecruits ~ Depth, data = sum_rep))
+anova(lm(MeanRecruits ~ Depth * Area, data = sum_rep))
+
+# non-Parametric tests
+summary(sum_rep_per100)
+with(sum_rep_per100,boxplot(MeanRecruits ~ Depth, 
+                      col= "lightgray",
+                      main= "",
+                      xlab= "Depth", 
+                      ylab= "Mean No. Recruits", 
+                      las= 1))
+# Implement Kruskal-Wallis test
+with(sum_rep_per100, kruskal.test(MeanRecruits ~ Depth))
+# Pairwise comparisons
+with(sum_rep_per100, pairwise.wilcox.test(MeanRecruits, Depth, exact = FALSE))
+
+
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "2_Recruitment_by_DEPTH.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+alldata_plot
+dev.off()
+
+# plot per 100 cm2
+sum_rep_per100$Depth <- factor(sum_rep_per100$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+fill <- "lightgray"
+alldata_plot_per100 <- ggplot(sum_rep_per100, aes(x = Depth, y = MeanRecruits)) +
+                geom_boxplot(fill = fill, outlier.shape = 20) +
+                labs(y = expression(bold("Mean Recruits / 100"~cm^2)))+
+                theme_bw() +
+                theme(axis.title.x = element_text(face="bold"),
+                      axis.title.y = element_text(face="bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank()) +
+                scale_y_continuous(breaks = seq(0, 4, 0.5), limits = c(0, 4))
+    
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "3_Recruitment_by_DEPTH_per100cm2.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+alldata_plot_per100
+dev.off()
+
+anova(lm(MeanRecruits ~ Depth, data = sum_rep_per100))
+anova(lm(MeanRecruits ~ Area, data = sum_rep_per100))
+anova(lm(MeanRecruits ~ Depth * Area, data = sum_rep_per100))
+
+# ANOVA and pairwise comparisons
+depth_a1 <- lm(MeanRecruits ~ Depth, data = sum_rep_per100)
+summary(depth_a1)
+anova(depth_a1)
+pairwise.t.test(sum_rep_per100$MeanRecruits, sum_rep_per100$Depth, p.adj = "none")
+
+
+# non-Parametric tests
+summary(sum_rep_per100)
+boxplot(MeanRecruits ~ Depth,
+            data = sum_rep_per100,
+            col= "lightgray",
+            main= "",
+            xlab= expression(bold("Depth")), 
+            ylab= expression(bold("Mean Recruits / 100"~cm^2)),
+            las= 1)
+# Implement Kruskal-Wallis test
+with(sum_rep_per100, kruskal.test(MeanRecruits ~ Depth))
+# Pairwise comparisons
+with(sum_rep_per100, pairwise.wilcox.test(MeanRecruits, Depth, exact = FALSE))
+
+
+```
+
+```{r Recruitment patterns by ORIENTATION}
+
+recruits$Depth <- factor(recruits$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+or_sum <- recruits %>%
+  group_by(Depth, Orientation) %>%
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n))
+
+or_sum_rep <- recruits %>%
+  group_by(Depth, Orientation, Replicate) %>%
+  summarise (n = n()) %>%
+  mutate(freq = n / sum(n))
+
+or_summary_stats <- or_sum_rep %>%
+  group_by(Depth, Orientation) %>%
+  summarise (mean = mean(freq),
+             sd = sd(freq),
+             se = st.err(freq))
+
+orientation <- ggplot(recruits, aes(x=Depth, fill = Orientation)) + 
+                geom_bar(position = "fill", colour = "black") +
+                scale_y_continuous(labels = percent) +
+                scale_fill_grey(start = 0, end = 1) +
+                theme_bw() +
+                theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+                labs(x = "Depth", y = "Proportion of Recruits (%)") +
+                theme(axis.title.x = element_text(face="bold")) +
+                theme(axis.title.y = element_text(face="bold")) +
+                guides(fill = guide_legend(reverse=FALSE, title= NULL))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "4_Recruit_ORIENTATION.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+orientation
+dev.off()
+
+# ANOVA and pairwise comparisons
+orientation_anova <- lm(n ~ Depth * Orientation, data = or_sum_rep)
+summary(orientation_anova)
+anova(orientation_anova)
+pairwise.t.test(or_sum_rep$n, or_sum_rep$Depth, p.adj = "none")
+
+# chi-squared
+library(MASS)
+tbl <- table(recruits$Depth, recruits$Orientation)
+tbl
+chisq.test(tbl)
+chisq.test(recruits$Depth, recruits$Orientation, correct=FALSE)
+
+# ANOVA and pairwise comparisons
+data$Depth <- factor(data$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+orientation_a1 <- lm(Total ~ Depth * Orientation, data = data)
+summary(orientation_a1)
+anova(orientation_a1)
+pairwise.t.test(data$Total, data$Depth, p.adj = "none")
+
+model1 <- aov(Total ~ Depth + Orientation, data = data)
+Anova(model1, type = "III")
+TukeyHSD(model1, "Orientation")
+TukeyHSD(model1, "Depth")
+
+```
+
+```{r Acropora size distributions}
+
+# Look at Acropora size distribution acrss depths
+acropora <- subset(recruits, Genera == "Acropora")
+acropora$Depth <- factor(acropora$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+
+acropora_size_plot <- ggplot(acropora, aes(x = Depth, y = Size)) +
+                      geom_boxplot() +
+                      labs(x = "Depth") +
+                      ylab(expression(bold(paste(Size~(µm))))) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      theme(axis.title.y = element_text(face="bold"))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "5_Acropora_sizes_boxplot.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+acropora_size_plot
+dev.off()
+
+library(Rmisc)
+acropora_sum <- summarySE(acropora, measurevar="Size", groupvars=c("Depth"))
+
+acropora_sum_plot <- ggplot(acropora_sum, aes(x=Depth, y=Size)) + 
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      ylab(expression(bold(paste(Mean~Size~(µm))))) +
+                      geom_errorbar(aes(ymin=Size-se, ymax=Size+se), width=.2, position = position_dodge(.9))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "6_Acropora_Size_Bar.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+acropora_sum_plot
+dev.off()
+
+
+
+AcroporaSD <- ggplot(acropora,aes(x=Size))+
+              geom_histogram(aes(y=..count../sum(..count..)), binwidth = 100) +
+              facet_grid(~Depth)+
+              theme_bw()+
+              labs(y = "Frequency") +
+              xlab(expression(bold(paste(Size~(µm))))) +
+              theme(axis.title.x = element_text(face="bold")) +
+              theme(axis.title.y = element_text(face="bold"))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "7_Acropora_Size_Histogram.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+AcroporaSD
+dev.off()
+
+
+# AcroporaSD_Proportion <- ggplot(acropora, aes(x=Size, fill=Depth)) +
+  #                        geom_bar(aes(y=c(..count..[..group..==1]/sum(..count..[..group..==1]),
+   #                       ..count..[..group..==2]/sum(..count..[..group..==2]),
+    #                      ..count..[..group..==3]/sum(..count..[..group..==3]),
+     #                     ..count..[..group..==4]/sum(..count..[..group..==4]))*100),
+      #                    position='dodge') +
+       #                   ylab("Proportion (%)") + 
+        #                  xlab(expression(bold(paste(Size~(µm)))))+
+         #                 facet_grid(~Depth)
+
+
+# % size distribution classes
+
+AcroporaSD_Proportion <- ggplot(acropora, aes(x=Size)) +
+                          geom_bar(aes(y = ..prop..,group = Depth)) +
+                          facet_wrap(~Depth) + 
+                          ylab("Proportion (%)") + 
+                          xlab(expression(bold(paste(Size~(µm)))))+
+                          theme(axis.title.y = element_text(face="bold")) +
+                          scale_y_continuous(labels = percent_format()) +
+                          theme(strip.text.x = element_text(size = 12, face = "bold"))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "8_Acropora_Size_Proportion_Hist.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+AcroporaSD_Proportion
+dev.off()
+
+
+
+# ANOVA and pairwise comparisons
+acropora_a1 <- lm(Size ~ Depth, data = acropora)
+summary(acropora_a1)
+anova(acropora_a1)
+pairwise.t.test(acropora$Size, acropora$Depth, p.adj = "none")
+
+# Kruscal-Wallis test
+kruskal.test(Size ~ Depth, data = acropora) 
+
+# Kolmogorov-Smirnov test
+
+acropora_3m <- subset(acropora, Depth == "3 m")
+acropora_8m <- subset(acropora, Depth == "8 m")
+acropora_25m <- subset(acropora, Depth == "25 m")
+acropora_40m <- subset(acropora, Depth == "40 m")
+  
+acropora_3m <- acropora_3m$Size
+acropora_8m <- acropora_8m$Size
+acropora_25m <- acropora_25m$Size
+acropora_40m <- acropora_40m$Size
+
+ks.test(acropora_3m, acropora_8m)
+ks.test(acropora_3m, acropora_25m)
+ks.test(acropora_3m, acropora_40m)
+ks.test(acropora_8m, acropora_25m)
+ks.test(acropora_8m, acropora_40m)
+ks.test(acropora_25m, acropora_40m)
+
+
+# >750 vs <750
+
+acropora$LargeSmall <- ifelse(acropora$Size < 750, "Small", "Large")
+acropora$LargeSmall <- factor(acropora$LargeSmall, levels = c("Small", "Large"))
+
+
+LargeVsmall <- ggplot(acropora, aes(x=LargeSmall)) +
+                      geom_bar(aes(y = ..prop..,group = Depth), position = "dodge") +
+                      facet_wrap(~Depth) + 
+                      ylab("Proportion (%)") + 
+                      xlab("Size Category")+
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      scale_y_continuous(labels = percent_format()) +
+                      theme(strip.text.x = element_text(size = 12, face = "bold"))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "20_Acropora_Large_v_Small.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+LargeVsmall
+dev.off()
+
+
+
+```
+
+```{r Size}
+
+# Look at Porites size distribution acrss depths
+porites <- subset(recruits, Genera == "Porites")
+porites$Depth <- factor(porites$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+# ANOVA and pairwise comparisons
+porites_a1 <- lm(Size ~ Depth * Area, data = porites)
+summary(porites_a1)
+anova(porites_a1)
+pairwise.t.test(porites$Size, porites$Area, p.adj = "none")
+
+# Kruscal-Wallis test
+kruskal.test(Size ~ Depth, data = porites) 
+
+
+
+# Look at Pocillopora size distribution acrss depths
+pocillopora <- subset(recruits, Genera == "Pocillopora")
+pocillopora$Depth <- factor(pocillopora$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+# ANOVA and pairwise comparisons
+pocillopora_a1 <- lm(Size ~ Depth, data = pocillopora)
+summary(pocillopora_a1)
+anova(pocillopora_a1)
+pairwise.t.test(pocillopora$Size, pocillopora$Depth, p.adj = "none")
+
+# Kruscal-Wallis test
+kruskal.test(Size ~ Depth, data = pocillopora) 
+
+
+
+```
+
+```{r FIGURE 7 Recruitment patterns by FAMILY + CORAL COVER}
+
+library(ggplot2)
+library(gtable)
+library(grid)
+library(extrafont)
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+genera_sum_rep <- read.csv("5b_Recruit_byGenera_zeros.csv", head = T)
+genera_sum_rep[is.na(genera_sum_rep)] <- 0
+melt <- genera_sum_rep %>% group_by(Depth, Genera) %>% summarise(mean = mean(mean), sd = sd(sd), 
+                                                                 se = st.err(se))
+melt[is.na(melt)] <- 0
+melt$Depth <- factor(melt$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+library(plyr)
+melt$Genera <- revalue(melt$Genera, c("Acropora"="Acroporidae"))
+melt$Genera <- revalue(melt$Genera, c("Porites"="Poritidae"))
+melt$Genera <- revalue(melt$Genera, c("Pocillopora"="Pocilloporidae"))
+melt$Genera <- factor(melt$Genera, levels = c("Acroporidae", "Poritidae", "Pocilloporidae", "Other"))    
+
+# melt$Genera <- factor(melt$Genera, levels = c("Acroporids", "Pocilloporids", "Other", "All Taxa"))
+figure <- ggplot(melt, aes(x = Genera, y = mean , shape = Depth))+
+          geom_point(stat="identity",position=position_dodge(.9), size = 5) +
+          scale_shape_manual(values = c(21, 22, 23, 24)) +
+          theme_classic() +
+          theme(axis.line.x = element_line(color="black", size = 1),
+          axis.line.y = element_line(color="black", size = 1)) +
+          theme(axis.text.x = element_text(colour="black", size = 15, face = "bold"), 
+                axis.text.y = element_text(colour="black", size = 15)) +
+          scale_y_continuous(breaks=seq(0,6,0.5)) +
+          theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+          labs(y = expression(bold("Mean Recruits / 100"~cm^2))) +
+          theme(axis.title.x = element_blank()) +
+          theme(axis.title.y = element_text(size = 15, face = "bold")) +
+          scale_fill_grey() +
+          theme(legend.title=element_blank()) +
+          geom_errorbar(aes(ymin= mean - se, ymax= mean + se), width=.2,position=position_dodge(.9)) 
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "8_Recruitment_byFamily.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+figure
+dev.off()
+
+tapply(melt$Genera, melt$Depth, summary)
+
+
+# biplot with coral cover
+p1 <- ggplot(melt, aes(x = Genera, y = mean , shape = Depth))+
+          geom_point(stat="identity",position=position_dodge(.9), size = 5) +
+          scale_shape_manual(values = c(21, 22, 23, 24)) +
+          theme_bw() +
+          theme(axis.line.x = element_line(color="black", size = 1),
+          axis.line.y = element_line(color="black", size = 1)) +
+          theme(axis.text.x = element_text(colour="black", size = 10, face = "bold"), 
+                axis.text.y = element_text(colour="black", size = 10)) +
+          scale_y_continuous(breaks=seq(0,6,0.5)) +
+          theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+          labs(y = expression(bold("Mean Recruits / 100"~cm^2))) +
+          theme(axis.title.x = element_blank()) +
+          theme(axis.title.y = element_text(size = 10, face = "bold")) +
+          scale_fill_grey() +
+          theme(legend.title=element_blank()) +
+          geom_errorbar(aes(ymin= mean - se, ymax= mean + se), width=.2,position=position_dodge(.9)) 
+p1
+
+setwd("C:/OneDrive/C5_Recruit/Data")
+# plotdata <- read.csv("39c_Plot_Data_FAMILY_percent.csv", head = T)
+plotdata <- read.csv("39d_Plot_Data_FAMILY_percent_othercover.csv", head = T)
+
+plotdata$Depth <- factor(plotdata$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+plot_summary <- plotdata %>% group_by(Depth, Category) %>% summarise(mean  = mean(Percent),
+                                                             SD = sd(Percent),
+                                                             SE = st.err(Percent))
+plot_summary$Depth <- factor(plot_summary$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+plot_summary$Category <- factor(plot_summary$Category, levels = c("Acroporidae", "Poritidae", "Pocilloporidae", "Other"))    
+
+
+p2 <- ggplot(plot_summary, aes(x=Category, y=mean, fill = Depth)) + 
+                      labs(y = "Percent Hard Coral Cover ± SE (%)") +
+                      scale_fill_grey(start = 0, end = 1) +
+                      theme_bw() +
+                      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+                      theme(axis.title.y = element_text(face="bold")) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      theme(axis.text.x = element_text(colour="black", size = 10, face = "bold"), 
+                            axis.text.y = element_text(colour="black", size = 10)) +
+                      theme(axis.title.x = element_blank()) +
+                      geom_bar(position=position_dodge(), stat="identity",colour = "black") +
+                      geom_errorbar(aes(ymin=mean-SE, ymax=mean+SE), width=.2, position = position_dodge(.9)) +
+                      guides(fill = guide_legend(reverse=FALSE, title= NULL))
+
+p2
+
+grid.newpage()
+grid.draw(rbind(ggplotGrob(p1), ggplotGrob(p2), size = "last"))
+
+setwd("C:/OneDrive/C5_Recruit/Note Paper/Figures")
+tiff(file = "Figure_7.tif", width = 8, height = 8, units = 'in', res = 500, compression = 'none')
+grid.newpage()
+grid.draw(rbind(ggplotGrob(p1), ggplotGrob(p2), size = "last"))
+dev.off()
+
+
+
+
+# ANOVA and pairwise comparisons
+acrop <- subset(genera_sum_rep, Genera == "Acropora")
+pocil <- subset(genera_sum_rep, Genera == "Pocillopora")
+other <- subset(genera_sum_rep, Genera == "Other")
+porites <- subset(genera_sum_rep, Genera == "Porites")
+
+acrop_a1 <- lm(mean ~ Depth, data = acrop)
+summary(acrop_a1)
+anova(acrop_a1)
+pairwise.t.test(acrop$mean, acrop$Depth, p.adj = "none")
+
+pocil_a1 <- lm(mean ~ Depth, data = pocil)
+summary(pocil_a1)
+anova(pocil_a1)
+pairwise.t.test(pocil$mean, pocil$Depth, p.adj = "none")
+
+other_a1 <- lm(mean ~ Depth, data = other)
+summary(other_a1)
+anova(other_a1)
+pairwise.t.test(other$mean, other$Depth, p.adj = "none")
+
+porites_a1 <- lm(mean ~ Depth, data = porites)
+summary(porites_a1)
+anova(porites_a1)
+pairwise.t.test(porites$mean, porites$Depth, p.adj = "none")
+
+# Kruskal-Wallis tests
+with(acrop, kruskal.test(mean ~ Depth))
+with(acrop, pairwise.wilcox.test(mean, Depth, exact = FALSE))
+
+with(pocil, kruskal.test(mean ~ Depth))
+with(pocil, pairwise.wilcox.test(mean, Depth, exact = FALSE))
+
+with(other, kruskal.test(mean ~ Depth))
+with(other, pairwise.wilcox.test(mean, Depth, exact = FALSE))
+
+with(porites, kruskal.test(mean ~ Depth))
+with(porites, pairwise.wilcox.test(mean, Depth, exact = FALSE))
+
+```
+
+```{r GAMs}
+
+set.seed(333)
+
+library(mgcv)
+library(gamm4)
+library(tidyr)
+library(dplyr)
+options(dplyr.width = Inf) #enables head() to display all coloums
+library(mgcv)
+library(MuMIn)
+library(car)
+library(doBy)
+library(gplots)
+library(ggplot2)
+library(RColorBrewer)
+library(doParallel)
+library(gamm4)
+library(zoo) #for filling in missing values
+
+GAMdata <- data
+
+pred.vars <- colnames(GAMdata[,c(8:13)])
+
+
+# Correalation of predictor variables----
+correl <- round(cor(GAMdata[,pred.vars]),2)
+
+# Check distributions----
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+pdf("Predictor_variable_distributions.pdf", title = "Predictor variable distributions")
+par(mfrow=c(3,2))
+
+for (i in pred.vars) {
+   x<-GAMdata[ ,i]
+   x = as.numeric(unlist(x))
+   hist((x))#Looks best
+   plot((x),main = paste(i))
+   hist(sqrt(x))
+   plot(sqrt(x))
+   hist(log(x+1))
+   plot(log(x+1))
+ }
+
+dev.off()
+
+# Consult pdf and guess best transformations to be:
+
+# "CCA" - sqrt
+# "BareTurf" - sqrt   
+# "Bryozoan" - sqrt
+# "Polychaete" - sqrt       
+# "Mollusc" - sqrt      
+# "Barnacle"  - sqrt     
+    
+
+GAMdata<- GAMdata%>%
+  mutate(CCA.sqrt=sqrt(CCA))%>%
+  mutate(BareTurf.sqrt=sqrt(BareTurf))%>%
+  mutate(Bryozoan.sqrt=sqrt(Bryozoan))%>%
+  mutate(Polycheate.sqrt=sqrt(Polycheate))%>%
+  mutate(Mollusc.sqrt=sqrt(Mollusc))%>%
+  mutate(Barnacle.sqrt=sqrt(Barnacle))
+
+
+# redo predictor variables
+pred.vars <- colnames(GAMdata[,c(2,3,6,19:24)])
+
+
+################
+## Total Recruits ##
+################
+TotalGAM <- gam(Total ~ Area + Depth + Orientation + s(CCA.sqrt) + s(BareTurf.sqrt) + s(Bryozoan.sqrt) +
+                  s(Polycheate.sqrt) + s(Mollusc.sqrt) + s(Barnacle.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+summary(TotalGAM)
+anova(TotalGAM)
+
+# remove non-significant variables
+TotalGAM <- gam(Total ~ Depth + Orientation + s(CCA.sqrt) + s(BareTurf.sqrt) + s(Bryozoan.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+
+summary(TotalGAM)
+AIC(TotalGAM)
+BIC(TotalGAM)
+
+gam.check(TotalGAM, k.rep = 1000) 
+plot(fitted(TotalGAM),residuals(TotalGAM))
+plot(GAMdata$Total,residuals(TotalGAM))
+plot(TotalGAM, pages=1,residuals=TRUE,all.terms=TRUE,shade=TRUE,shade.col="gray80")
+
+
+#####################
+## Acropora Recruits ##
+#####################
+AcroporaGAM <- gam(Acropora ~ Area + Depth + Orientation + s(CCA.sqrt) + s(BareTurf.sqrt) + s(Bryozoan.sqrt) +
+                  s(Polycheate.sqrt) + s(Mollusc.sqrt) + s(Barnacle.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+summary(AcroporaGAM)
+anova(AcroporaGAM)
+
+# remove non-significant variables
+AcroporaGAM <- gam(Acropora ~ Depth + Orientation + s(CCA.sqrt) + s(Bryozoan.sqrt) +
+                  s(Polycheate.sqrt) + s(Mollusc.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+
+summary(AcroporaGAM)
+AIC(AcroporaGAM)
+BIC(AcroporaGAM)
+
+gam.check(AcroporaGAM, k.rep = 1000) 
+plot(fitted(AcroporaGAM),residuals(AcroporaGAM))
+plot(GAMdata$Acropora,residuals(AcroporaGAM))
+plot(AcroporaGAM, pages=1,residuals=TRUE,all.terms=TRUE,shade=TRUE,shade.col="gray80")
+
+
+##########################
+## Pocillopora Recruits ##
+##########################
+PocilloporaGAM <- gam(Pocillopora ~ Area + Depth + Orientation + s(CCA.sqrt) + s(BareTurf.sqrt) + s(Bryozoan.sqrt) +
+                  s(Polycheate.sqrt) + s(Mollusc.sqrt) + s(Barnacle.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+summary(PocilloporaGAM)
+anova(PocilloporaGAM)
+
+# remove non-significant variables
+PocilloporaGAM <- gam(Pocillopora ~ Depth + s(CCA.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+
+summary(PocilloporaGAM)
+AIC(PocilloporaGAM)
+BIC(PocilloporaGAM)
+
+gam.check(PocilloporaGAM, k.rep = 1000) 
+plot(fitted(PocilloporaGAM),residuals(PocilloporaGAM))
+plot(GAMdata$Pocillopora,residuals(PocilloporaGAM))
+plot(PocilloporaGAM, pages=1,residuals=TRUE,all.terms=TRUE,shade=TRUE,shade.col="gray80")
+
+
+#####################
+## Porites Recruits ##
+#####################
+PoritesGAM <- gam(Porites ~ Area + Depth + Orientation + s(CCA.sqrt) + s(BareTurf.sqrt) + s(Bryozoan.sqrt) +
+                  s(Polycheate.sqrt) + s(Mollusc.sqrt) + s(Barnacle.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+summary(PoritesGAM)
+anova(PoritesGAM)
+
+# remove non-significant variables
+PoritesGAM <- gam(Porites ~ Area + Depth + Orientation + s(Mollusc.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+
+summary(PoritesGAM)
+AIC(PoritesGAM)
+BIC(PoritesGAM)
+
+gam.check(PoritesGAM, k.rep = 1000) 
+plot(fitted(PoritesGAM),residuals(PoritesGAM))
+plot(GAMdata$Porites,residuals(PoritesGAM))
+plot(PoritesGAM, pages=1,residuals=TRUE,all.terms=TRUE,shade=TRUE,shade.col="gray80")
+
+
+#####################
+## Other Recruits ##
+#####################
+OtherGAM <- gam(Other ~ Area + Depth + Orientation + s(CCA.sqrt) + s(BareTurf.sqrt) + s(Bryozoan.sqrt) +
+                  s(Polycheate.sqrt) + s(Mollusc.sqrt) + s(Barnacle.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+summary(OtherGAM)
+anova(OtherGAM)
+
+# remove non-significant variables
+OtherGAM <- gam(Other ~ Depth + s(CCA.sqrt) + s(Bryozoan.sqrt) + s(Mollusc.sqrt),
+                family = tw(),
+                data = GAMdata,
+                select = T,
+                na.action = na.exclude)
+
+
+summary(OtherGAM)
+AIC(OtherGAM)
+BIC(OtherGAM)
+
+gam.check(OtherGAM, k.rep = 1000) 
+plot(fitted(OtherGAM),residuals(OtherGAM))
+plot(GAMdata$Other,residuals(OtherGAM))
+plot(OtherGAM, pages=1,residuals=TRUE,all.terms=TRUE,shade=TRUE,shade.col="gray80")
+
+```
+
+```{r Total Recruits Size Distributions}
+
+# Look at Acropora size distribution acrss depths
+recruits$Depth <- factor(recruits$Depth, levels = c("3 m", "8 m", "25 m", "40 m"))
+
+
+recruits_size_plot <- ggplot(recruits, aes(x = Depth, y = Size)) +
+                      geom_boxplot() +
+                      labs(x = "Depth") +
+                      ylab(expression(bold(paste(Size~(µm))))) +
+                      theme(axis.title.x = element_text(face="bold")) +
+                      theme(axis.title.y = element_text(face="bold"))
+
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "10_recruits_sizes_boxplot.tif", width = 4, height = 4, units = 'in', res = 500, compression = 'none')
+recruits_size_plot
+dev.off()
+
+library(Rmisc)
+recruits_sum <- summarySE(recruits, measurevar="Size", groupvars=c("Depth"))
+
+recruits_sum_plot <- ggplot(recruits_sum, aes(x=Depth, y=Size)) + 
+                      geom_bar(position=position_dodge(), stat="identity") +
+                      ylab(expression(bold(paste(Mean~Size~(µm))))) +
+                      geom_errorbar(aes(ymin=Size-se, ymax=Size+se), width=.2, position = position_dodge(.9))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "11_recruits_Size_Bar.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+recruits_sum_plot
+dev.off()
+
+
+
+recruitsSD <- ggplot(recruits,aes(x=Size))+
+              geom_histogram(aes(y=..count../sum(..count..)), binwidth = 100) +
+              facet_grid(~Depth)+
+              theme_bw()+
+              labs(y = "Frequency") +
+              xlab(expression(bold(paste(Size~(µm))))) +
+              theme(axis.title.x = element_text(face="bold")) +
+              theme(axis.title.y = element_text(face="bold"))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "12_recruits_Size_Histogram.tif", width = 8, height = 4, units = 'in', res = 500, compression = 'none')
+recruitsSD
+dev.off()
+
+recruitsSD_Proportion <- ggplot(recruits, aes(x=Size)) +
+                          geom_bar(aes(y = ..prop..,group = Depth)) +
+                          facet_wrap(~Depth) + 
+                          ylab("Proportion (%)") + 
+                          xlab(expression(bold(paste(Size~(µm)))))+
+                          theme(axis.title.y = element_text(face="bold")) +
+                          scale_y_continuous(labels = percent_format()) +
+                          theme(strip.text.x = element_text(size = 12, face = "bold"))
+setwd("C:/OneDrive/C5_Recruit/Data/Summary")
+tiff(file = "13_recruits_Size_Proportion_Hist.tif", width = 6, height = 4, units = 'in', res = 500, compression = 'none')
+recruitsSD_Proportion
+dev.off()
+
+
+
+
+# ANOVA and pairwise comparisons
+recruits_a1 <- lm(Size ~ Depth, data = recruits)
+summary(recruits_a1)
+anova(recruits_a1)
+pairwise.t.test(recruits$Size, recruits$Depth, p.adj = "none")
+
+# Kruscal-Wallis test
+kruskal.test(Size ~ Depth, data = recruits) 
+
+# Kolmogorov-Smirnov test
+
+recruits_3m <- subset(recruits, Depth == "3 m")
+recruits_8m <- subset(recruits, Depth == "8 m")
+recruits_25m <- subset(recruits, Depth == "25 m")
+recruits_40m <- subset(recruits, Depth == "40 m")
+  
+recruits_3m <- recruits_3m$Size
+recruits_8m <- recruits_8m$Size
+recruits_25m <- recruits_25m$Size
+recruits_40m <- recruits_40m$Size
+
+ks.test(recruits_3m, recruits_8m)
+ks.test(recruits_3m, recruits_25m)
+ks.test(recruits_3m, recruits_40m)
+ks.test(recruits_8m, recruits_25m)
+ks.test(recruits_8m, recruits_40m)
+ks.test(recruits_25m, recruits_40m)
+
+```
+
+```{r}
+setwd("C:/Users/TUR262/Desktop")
+a <- read.csv("a.csv", head = T)
+b <- read.csv("b.csv", head = T)
+b[is.na(b)] <- 0
+merge <- merge(a, b, by.x = "ID", by.y = "ID", all.x=TRUE)
+write.csv(merge, "merge.csv")
+
+```
+
